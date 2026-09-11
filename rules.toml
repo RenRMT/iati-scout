@@ -1,0 +1,41 @@
+# Configuration for `iati-scout check`.
+# Every rule is enabled by default. Override per rule with:
+#   [rules."W-C09"]
+#   enabled = false      # skip the rule entirely
+#   systemic = true      # keep the findings, but mark them as a known organisation-wide pattern
+#                        # so reports can collapse them to a count + samples
+
+[thresholds]
+stale_months = 12                  # W-A08: implementation activity not updated for this long
+budget_max_days = 366              # E-B04: budget period longer than this
+budget_min_days = 28               # W-B06: budget period shorter than this
+disbursed_tolerance = 0.01         # W-B12: closed activity is "fully disbursed" within this fraction
+commitment_tolerance = 0.001       # E-B09: disbursed may exceed committed by this fraction
+budget_vs_commitment_ratio = 0.5   # W-B20: total budget differs from commitment by more than this
+value_date_max_days = 366          # W-B18: value-date vs transaction-date gap
+min_transaction_value = 1.0        # W-B19: values below this are suspicious
+title_min_length = 10              # W-F04
+description_min_length = 30        # W-F05
+percentage_tolerance = 0.5         # E-C01/W-C02/E-C03: allowed deviation from 100
+truncation_lengths = [255, 256, 500, 1000, 2000, 4000]  # W-F05: typical DB column limits
+home_country = "NL"                # W-C08 / W-F03
+home_bbox = [50.5, 3.2, 53.7, 7.3] # W-F03: lat_min, lon_min, lat_max, lon_max
+
+[rules]
+
+# Known organisation-wide patterns in the RVO data (see plan / README). Kept enabled so the
+# counts stay visible, but flagged systemic.
+[rules."E-B01"]
+systemic = true   # de-commitments published as budgets with period-end < period-start
+[rules."E-B02"]
+systemic = true
+[rules."E-B03"]
+systemic = true   # negative budgets for de-commitments
+[rules."W-C02"]
+systemic = true   # SDG vocabulary (7) published with percentage=1 per goal
+[rules."W-C09"]
+systemic = true   # humanitarian flag never published
+[rules."W-B16"]
+systemic = true   # receiver org rarely given on commitments
+[rules."W-B17"]
+systemic = true   # receiver org type 90 used throughout

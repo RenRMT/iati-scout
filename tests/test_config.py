@@ -24,7 +24,7 @@ def test_load_settings_from_config_file(tmp_path, monkeypatch):
     monkeypatch.delenv("IATI_ORG_ID", raising=False)
     config_path = _write_config(tmp_path)
 
-    settings = load_settings(config_path=config_path)
+    settings = load_settings(config_path=config_path, env_path=None)
 
     assert settings.org_id == "FILE-ORG"
     assert settings.api_key == "secret"
@@ -39,7 +39,7 @@ def test_explicit_org_id_overrides_env_and_file(tmp_path, monkeypatch):
     monkeypatch.setenv("IATI_ORG_ID", "ENV-ORG")
     config_path = _write_config(tmp_path)
 
-    settings = load_settings(org_id="CLI-ORG", config_path=config_path)
+    settings = load_settings(org_id="CLI-ORG", config_path=config_path, env_path=None)
 
     assert settings.org_id == "CLI-ORG"
 
@@ -49,7 +49,7 @@ def test_env_org_id_overrides_file(tmp_path, monkeypatch):
     monkeypatch.setenv("IATI_ORG_ID", "ENV-ORG")
     config_path = _write_config(tmp_path)
 
-    settings = load_settings(config_path=config_path)
+    settings = load_settings(config_path=config_path, env_path=None)
 
     assert settings.org_id == "ENV-ORG"
 
@@ -61,7 +61,7 @@ def test_missing_org_id_raises(tmp_path, monkeypatch):
     config_path.write_text('collections = ["activity"]\n', encoding="utf-8")
 
     with pytest.raises(ConfigError):
-        load_settings(config_path=config_path)
+        load_settings(config_path=config_path, env_path=None)
 
 
 def test_missing_api_key_raises(tmp_path, monkeypatch):
@@ -69,7 +69,7 @@ def test_missing_api_key_raises(tmp_path, monkeypatch):
     config_path = _write_config(tmp_path)
 
     with pytest.raises(ConfigError):
-        load_settings(config_path=config_path)
+        load_settings(config_path=config_path, env_path=None)
 
 
 def test_missing_collections_raises(tmp_path, monkeypatch):
@@ -78,4 +78,4 @@ def test_missing_collections_raises(tmp_path, monkeypatch):
     config_path.write_text('org_id = "FILE-ORG"\n', encoding="utf-8")
 
     with pytest.raises(ConfigError):
-        load_settings(config_path=config_path)
+        load_settings(config_path=config_path, env_path=None)
