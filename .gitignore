@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# iati-scout: fetched IATI Datastore data (see config.toml data_dir)
+data/

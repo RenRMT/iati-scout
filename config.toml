@@ -1,0 +1,21 @@
+# Non-secret configuration for iati-scout.
+# Secrets (API key) go in .env instead — see .env.example.
+
+# Default IATI organisation identifier to fetch.
+# Overridden by IATI_ORG_ID env var, and by --org-id on the command line.
+org_id = ""
+
+# Datastore collections to fetch. Each becomes one JSONL file.
+collections = ["activity", "transaction", "budget"]
+
+# Rows requested per Solr page (max supported by the Datastore is 1000).
+rows_per_page = 500
+
+# Minimum seconds between requests, to stay within the Datastore's rate limit.
+min_request_interval = 2.0
+
+# Directory (relative to the project root) where fetched data is written.
+data_dir = "data/raw"
+
+# IATI Datastore API base URL.
+base_url = "https://api.iatistandard.org/datastore"
