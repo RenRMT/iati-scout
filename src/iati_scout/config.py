@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 
 
 class ConfigError(Exception):
@@ -34,13 +35,17 @@ def load_settings(
     collections: list[str] | None = None,
     data_dir: str | None = None,
     config_path: Path = DEFAULT_CONFIG_PATH,
+    env_path: Path | None = DEFAULT_ENV_PATH,
+    require_api_key: bool = True,
 ) -> Settings:
     """Resolve settings with precedence: explicit args > env vars > config.toml.
 
-    `.env` (if present) is loaded into the environment first, without
-    overriding any variable already set in the real environment.
+    `env_path` (default `.env` in the project root, if present) is loaded into
+    the environment first, without overriding any variable already set in the
+    real environment. Pass `env_path=None` to skip it (tests).
     """
-    load_dotenv(PROJECT_ROOT / ".env", override=False)
+    if env_path is not None:
+        load_dotenv(env_path, override=False)
 
     file_config: dict = {}
     if config_path.exists():
@@ -54,8 +59,8 @@ def load_settings(
             "or set org_id in config.toml."
         )
 
-    api_key = os.environ.get("IATI_API_KEY")
-    if not api_key:
+    api_key = os.environ.get("IATI_API_KEY") or ""
+    if not api_key and require_api_key:
         raise ConfigError(
             "No API key configured. Set IATI_API_KEY in your environment or in a .env file "
             "(see .env.example). Get a key at https://developer.iatistandard.org/."
