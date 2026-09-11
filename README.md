@@ -1,4 +1,4 @@
-# iati-scout
+# IATI Scout <a href="https://github.com/RenRMT/iati-scout"><img src="docs/figures/logo_dark.png" align="right" height="100" /></a>
 
 A small Python app for retrieving and analysing [IATI](https://iatistandard.org/) (International
 Aid Transparency Initiative) data for a given organisation.
@@ -129,7 +129,8 @@ the output, flagged, so a report can collapse them to a count instead of thousan
 data/quality/<org_id>/
 ├── findings.jsonl   # canonical: one self-contained finding per line
 ├── findings.csv     # same, flattened for spreadsheets
-└── summary.md       # counts per rule + sample findings with links
+├── summary.md       # counts per rule + sample findings with links
+└── export/          # machine-readable contract for the dashboard (see below)
 ```
 
 Every finding carries: rule code/severity/title, activity identifier and title, a message that
@@ -137,6 +138,19 @@ quotes the offending values, a structured `evidence` dict with those values, an 
 for transaction/budget-level findings, `related` activities (e.g. the parent, with its own link),
 and `urls` — a [d-portal](https://d-portal.iatistandard.org/) link to the activity plus the
 Datastore query.
+
+`check` also writes `data/quality/<org_id>/export/` (skip with `--no-export`) — a smaller,
+columnar version of the same findings (Parquet + JSON) for the dashboard below. See
+[src/iati_scout/quality/export.py](src/iati_scout/quality/export.py) for the exact file contract.
+
+## Dashboard
+
+An [Observable Framework](https://observablehq.com/framework/) static site in
+[dashboard/](dashboard/) visualises the `export/` output: an overview with KPIs and a findings
+chart, a rule explorer, a filterable findings table, and an activity explorer. It is a **separate
+layer** — it only reads the `export/` files and never imports `iati_scout`. See
+[dashboard/README.md](dashboard/README.md) for how to run it (`cd dashboard && npm install && npm
+run dev`) and its data contract.
 
 ### Caveat: nested elements
 
