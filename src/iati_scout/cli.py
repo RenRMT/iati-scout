@@ -55,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--list-rules", action="store_true", help="Print the rule catalogue and exit"
     )
     check_parser.add_argument(
+        "--no-export",
+        action="store_true",
+        help="Skip writing the dashboard export (out-dir/export/)",
+    )
+    check_parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable debug logging"
     )
 
@@ -80,6 +85,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _check(args: argparse.Namespace) -> int:
+    import json
+
+    from iati_scout.quality.export import write_export
     from iati_scout.quality.findings import Severity
     from iati_scout.quality.model import load_dataset
     from iati_scout.quality.registry import all_rules, load_rule_config
@@ -129,6 +137,15 @@ def _check(args: argparse.Namespace) -> int:
     warnings = len(findings) - errors
     print(f"{errors} error(s), {warnings} warning(s) across {len(dataset)} activities")
     print(f"Reports written to {paths['summary'].parent}")
+
+    if not args.no_export:
+        manifest_path = org_dir / "manifest.json"
+        raw_manifest = (
+            json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+        )
+        export_paths = write_export(findings, rules, config, dataset, out_dir, raw_manifest)
+        print(f"Dashboard export written to {export_paths['meta'].parent}")
+
     return 0
 
 
