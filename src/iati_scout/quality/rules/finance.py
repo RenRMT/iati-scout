@@ -359,3 +359,64 @@ def transaction_on_year_boundary(a: Activity, ctx: Context) -> Iterator[Issue]:
                 {"transaction_date": t.date},
                 item=t.locator(),
             )
+
+
+@rule(
+    "E-B22",
+    Severity.ERROR,
+    "Transaction date in the future",
+    "IATI ruleset 11.2.1: the transaction date must not be in the future.",
+)
+def transaction_date_in_future(a: Activity, ctx: Context) -> Iterator[Issue]:
+    for t in a.transactions:
+        if t.date and t.date > ctx.today:
+            yield Issue(
+                f"{_txn_name(t.type)} is dated {fmt_date(t.date)}, after today "
+                f"({fmt_date(ctx.today)})",
+                {"transaction_date": t.date, "today": ctx.today},
+                item=t.locator(),
+            )
+
+
+@rule(
+    "E-B23",
+    Severity.ERROR,
+    "Transaction value-date in the future",
+    "IATI ruleset 11.2.2: the transaction value-date must not be in the future.",
+)
+def transaction_value_date_in_future(a: Activity, ctx: Context) -> Iterator[Issue]:
+    for t in a.transactions:
+        if t.value_date and t.value_date > ctx.today:
+            yield Issue(
+                f"{_txn_name(t.type)} has value-date {fmt_date(t.value_date)}, after "
+                f"today ({fmt_date(ctx.today)})",
+                {"value_date": t.value_date, "today": ctx.today},
+                item=t.locator(),
+            )
+
+
+@rule(
+    "E-B24",
+    Severity.ERROR,
+    "Currency missing for a monetary value",
+    "IATI ruleset 7.8.1: the activity should specify a default currency OR the "
+    "currency must be specified for each monetary value.",
+)
+def currency_missing(a: Activity, ctx: Context) -> Iterator[Issue]:
+    for t in a.transactions:
+        if not t.currency:
+            yield Issue(
+                f"{_txn_name(t.type)} of {t.value:g} on {fmt_date(t.date)} has no "
+                f"currency, and the activity has no default-currency either",
+                {"value": t.value},
+                item=t.locator(),
+            )
+    for b in a.budgets:
+        if not b.currency:
+            yield Issue(
+                f"Budget for {fmt_date(b.period_start)} – {fmt_date(b.period_end)} of "
+                f"{b.value:g} has no currency, and the activity has no default-currency "
+                f"either",
+                {"value": b.value},
+                item=b.locator(),
+            )

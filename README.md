@@ -103,10 +103,31 @@ follow-up). Sections:
 | E | Organisations | no funding/accountable org; same org twice in one role; org type "Other" |
 | F | Text & locations | unparseable coordinates; location in home country while recipient differs; truncated descriptions |
 | G | Results | non-numeric indicator values; closed activity without results |
+| H | Identifier hygiene | activity id equals reporting-org id; identifier whitespace or forbidden symbols |
 
 Run `--list-rules` for the full list with titles. Rules are pure functions in
 [src/iati_scout/quality/rules/](src/iati_scout/quality/rules/); adding one means registering a
 function with `@rule(code, severity, title)` and adding a test.
+
+### Coverage of the IATI standard ruleset
+
+Sections A–H also cover most of the [IATI standard
+ruleset](https://iatistandard.org/en/iati-standard/203/rulesets/standard-ruleset/) — the
+official set of cross-field validation rules (distinct from codelist/schema validation, which
+the IATI Validator already covers before data is published). Rules ported from it carry the
+matching ruleset ID in their `description` (see `--list-rules` or `rules.json` in the dashboard
+export). Deliberately not implemented, because this tool doesn't fetch or model the data they'd
+need:
+
+- Rules scoped to the `iati-organisations` registration file (this tool only processes
+  `activity`/`transaction`/`budget` data for one reporting organisation)
+- The approved reporting-organisation agency-code prefix check (needs an external codelist)
+- Result-level-vs-indicator-level reference placement, and sector/recipient-country consistency
+  between activity and transaction level — the Datastore's flattened schema loses the nesting
+  (or, for the latter, denormalizes the activity's own sector/country onto every transaction row,
+  making a genuine per-transaction override indistinguishable from inherited data)
+- A handful of niche identifier fields (`other-identifier`/`owner-org`, transaction-level
+  `provider-activity-id`/`receiver-activity-id`)
 
 ### Configuration: `rules.toml`
 

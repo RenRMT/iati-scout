@@ -9,6 +9,7 @@ from iati_scout.quality.model import (
     Dataset,
     ParticipatingOrg,
     RecipientCountry,
+    RecipientRegion,
     RelatedActivityRef,
     Sector,
     Transaction,
@@ -29,6 +30,7 @@ def make_activity(identifier: str = "XX-TEST-1-A", **overrides) -> Activity:
         "status": "2",
         "hierarchy": None,
         "currency": "EUR",
+        "default_language": "en",
         "dates": {
             "1": date(2024, 1, 1),
             "2": date(2024, 1, 15),
@@ -39,7 +41,7 @@ def make_activity(identifier: str = "XX-TEST-1-A", **overrides) -> Activity:
         "reporting_org_names": ["Test Org"],
         "sectors": [Sector("1", "15110", 100.0), Sector("7", "16", 100.0)],
         "recipient_countries": [RecipientCountry("KE", 100.0)],
-        "recipient_region_codes": [],
+        "recipient_regions": [],
         "participating_orgs": [
             ParticipatingOrg("XM-DAC-7", "Funder", "1", "10"),
             ParticipatingOrg(ORG, "Test Org", "2", "10"),
@@ -142,6 +144,7 @@ def clean_activity() -> Activity:
 __all__ = [
     "ORG",
     "TODAY",
+    "RecipientRegion",
     "RelatedActivityRef",
     "make_activity",
     "make_budget",

@@ -5,6 +5,7 @@ from iati_scout.quality.rules import (  # noqa: F401
     dates,
     finance,
     hierarchy,
+    identifiers,
     organisations,
     results,
     text_location,

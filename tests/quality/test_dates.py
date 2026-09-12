@@ -81,3 +81,24 @@ def test_w_a09_transaction_after_last_updated():
     issues = run("W-A09", a)
     assert len(issues) == 1
     assert issues[0].item["kind"] == "transaction"
+
+
+def test_e_a10_last_updated_in_future():
+    a = make_activity(last_updated=datetime(2030, 1, 1, tzinfo=UTC))
+    assert len(run("E-A10", a)) == 1
+
+
+def test_e_a10_last_updated_today_ok():
+    a = make_activity(last_updated=datetime(2026, 9, 11, tzinfo=UTC))
+    assert run("E-A10", a) == []
+
+
+def test_e_a11_no_start_date():
+    a = make_activity(dates={"3": date(2027, 12, 31)})
+    issues = run("E-A11", a)
+    assert len(issues) == 1
+
+
+def test_e_a11_planned_start_only_ok():
+    a = make_activity(dates={"1": date(2024, 1, 1)})
+    assert run("E-A11", a) == []

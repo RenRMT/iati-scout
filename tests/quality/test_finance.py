@@ -193,3 +193,43 @@ def test_w_b21_year_boundary_dates():
         transactions=[make_txn(on=date(2025, 1, 1), index=0), make_txn(on=date(2025, 12, 31), index=1)]
     )
     assert len(run("W-B21", a)) == 2
+
+
+def test_e_b22_transaction_date_in_future():
+    a = make_activity(transactions=[make_txn(on=date(2030, 1, 1))])
+    issues = run("E-B22", a)
+    assert len(issues) == 1
+    assert issues[0].item["kind"] == "transaction"
+
+
+def test_e_b22_transaction_date_today_ok():
+    a = make_activity(transactions=[make_txn(on=date(2026, 9, 11))])
+    assert run("E-B22", a) == []
+
+
+def test_e_b23_transaction_value_date_in_future():
+    a = make_activity(
+        transactions=[make_txn(on=date(2025, 3, 1), value_date=date(2030, 1, 1))]
+    )
+    assert len(run("E-B23", a)) == 1
+
+
+def test_e_b24_currency_missing():
+    a = make_activity(
+        currency=None,
+        transactions=[make_txn(currency=None)],
+        budgets=[make_budget(currency=None)],
+    )
+    issues = run("E-B24", a)
+    assert len(issues) == 2
+    kinds = {i.item["kind"] for i in issues}
+    assert kinds == {"transaction", "budget"}
+
+
+def test_e_b24_default_currency_covers_value_ok():
+    a = make_activity(
+        currency="EUR",
+        transactions=[make_txn(currency="EUR")],
+        budgets=[make_budget(currency="EUR")],
+    )
+    assert run("E-B24", a) == []

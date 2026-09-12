@@ -123,3 +123,44 @@ def test_w_g03_closed_without_results():
 def test_w_g04_closed_targets_without_actuals():
     a = make_activity(status="4", raw={"result_indicator_period_target_value": ["10"]})
     assert len(run("W-G04", a)) == 1
+
+
+def test_e_g05_missing_baseline_value():
+    a = make_activity(
+        raw={"result_indicator_measure": ["1", "2"], "result_indicator_baseline_value": ["10"]}
+    )
+    issues = run("E-G05", a)
+    assert len(issues) == 1
+    assert issues[0].evidence["present"] == 1
+    assert issues[0].evidence["expected"] == 2
+
+
+def test_e_g05_all_baselines_present_ok():
+    a = make_activity(
+        raw={"result_indicator_measure": ["1", "2"], "result_indicator_baseline_value": ["10", "20"]}
+    )
+    assert run("E-G05", a) == []
+
+
+def test_e_g05_skipped_for_qualitative():
+    assert run("E-G05", make_activity(raw={"result_indicator_measure": ["5"]})) == []
+
+
+def test_w_g06_qualitative_with_value():
+    a = make_activity(
+        raw={"result_indicator_measure": ["5"], "result_indicator_baseline_value": ["some text"]}
+    )
+    issues = run("W-G06", a)
+    assert len(issues) == 1
+    assert issues[0].evidence["field"] == "baseline"
+
+
+def test_w_g06_qualitative_without_value_ok():
+    assert run("W-G06", make_activity(raw={"result_indicator_measure": ["5"]})) == []
+
+
+def test_w_g06_skipped_for_mixed_measures():
+    a = make_activity(
+        raw={"result_indicator_measure": ["1", "5"], "result_indicator_baseline_value": ["x"]}
+    )
+    assert run("W-G06", a) == []

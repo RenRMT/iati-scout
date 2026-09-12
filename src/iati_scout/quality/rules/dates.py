@@ -116,3 +116,35 @@ def transaction_after_last_updated(a: Activity, ctx: Context) -> Iterator[Issue]
                 {"transaction_date": t.date, "last_updated": cutoff},
                 item=t.locator(),
             )
+
+
+@rule(
+    "E-A10",
+    Severity.ERROR,
+    "Last-updated-datetime in the future",
+    "IATI ruleset 11.1.1: the last-updated-datetime of the activity must not be in "
+    "the future.",
+)
+def last_updated_in_future(a: Activity, ctx: Context) -> Iterator[Issue]:
+    if a.last_updated and a.last_updated.date() > ctx.today:
+        yield Issue(
+            f"last-updated-datetime {fmt_date(a.last_updated.date())} is after today "
+            f"({fmt_date(ctx.today)})",
+            {"last_updated": a.last_updated.date(), "today": ctx.today},
+        )
+
+
+@rule(
+    "E-A11",
+    Severity.ERROR,
+    "No planned or actual start date",
+    "IATI ruleset 6.11.1: the activity must have a planned start date or an actual "
+    "start date.",
+)
+def missing_start_date(a: Activity, ctx: Context) -> Iterator[Issue]:
+    if not a.planned_start and not a.actual_start:
+        yield Issue(
+            "Activity has neither a planned start date (type 1) nor an actual start "
+            "date (type 2)",
+            {"planned_start": None, "actual_start": None},
+        )

@@ -153,6 +153,13 @@ class RecipientCountry:
 
 
 @dataclass(frozen=True)
+class RecipientRegion:
+    vocabulary: str | None
+    code: str
+    percentage: float | None
+
+
+@dataclass(frozen=True)
 class ParticipatingOrg:
     ref: str | None
     name: str | None
@@ -175,13 +182,14 @@ class Activity:
     status: str | None
     hierarchy: int | None
     currency: str | None
+    default_language: str | None
     dates: dict[str, date]
     last_updated: datetime | None
     reporting_org_ref: str | None
     reporting_org_names: list[str]
     sectors: list[Sector]
     recipient_countries: list[RecipientCountry]
-    recipient_region_codes: list[str]
+    recipient_regions: list[RecipientRegion]
     participating_orgs: list[ParticipatingOrg]
     related: list[RelatedActivityRef]
     policy_markers: dict[str, str]
@@ -246,6 +254,14 @@ def _activity_from_doc(doc: dict[str, Any]) -> Activity:
             as_list(doc.get("recipient_country_percentage")),
         )
     ]
+    regions = [
+        RecipientRegion(vocabulary=v, code=c, percentage=p)
+        for v, c, p in _zip_pad(
+            as_list(doc.get("recipient_region_vocabulary")),
+            as_list(doc.get("recipient_region_code")),
+            as_list(doc.get("recipient_region_percentage")),
+        )
+    ]
     orgs = [
         ParticipatingOrg(ref=r, name=n, role=role, type=t)
         for r, n, role, t in _zip_pad(
@@ -271,13 +287,14 @@ def _activity_from_doc(doc: dict[str, Any]) -> Activity:
         status=doc.get("activity_status_code"),
         hierarchy=doc.get("hierarchy"),
         currency=doc.get("default_currency"),
+        default_language=doc.get("xml_lang"),
         dates=dates,
         last_updated=parse_datetime(doc.get("last_updated_datetime")),
         reporting_org_ref=doc.get("reporting_org_ref"),
         reporting_org_names=as_list(doc.get("reporting_org_narrative")),
         sectors=sectors,
         recipient_countries=countries,
-        recipient_region_codes=as_list(doc.get("recipient_region_code")),
+        recipient_regions=regions,
         participating_orgs=orgs,
         related=related,
         policy_markers=markers,

@@ -97,6 +97,8 @@ def _check(args: argparse.Namespace) -> int:
     if args.list_rules:
         for spec in all_rules():
             print(f"{spec.code}  {spec.severity.value:7s}  {spec.title}")
+            if spec.description:
+                print(f"           {spec.description}")
         return 0
 
     try:
