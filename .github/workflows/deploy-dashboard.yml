@@ -1,0 +1,64 @@
+name: Deploy dashboard to GitHub Pages
+
+on:
+  schedule:
+    # Every Monday at 03:00 UTC.
+    - cron: "0 3 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IATI_API_KEY: ${{ secrets.IATI_API_KEY }}
+      IATI_ORG_ID: ${{ vars.IATI_ORG_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install iati-scout
+        run: pip install -e .
+
+      - name: Fetch IATI Datastore data
+        run: python -m iati_scout fetch
+
+      - name: Run quality checks and write dashboard export
+        run: python -m iati_scout check
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Build dashboard
+        working-directory: dashboard
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
