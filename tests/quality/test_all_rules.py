@@ -8,7 +8,7 @@ from iati_scout.quality.registry import Context, all_rules
 from iati_scout.quality.runner import run_rule
 from tests.quality.conftest import make_activity, make_dataset
 
-CODE_RE = re.compile(r"^[EW]-[A-G]\d{2}$")
+CODE_RE = re.compile(r"^[EW]-[A-H]\d{2}$")
 
 
 def test_rule_codes_and_severity_prefix_agree():

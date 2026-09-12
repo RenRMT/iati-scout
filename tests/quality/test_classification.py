@@ -1,4 +1,4 @@
-from iati_scout.quality.model import RecipientCountry, Sector
+from iati_scout.quality.model import RecipientCountry, RecipientRegion, Sector
 from tests.quality.conftest import make_activity, run
 
 
@@ -37,8 +37,7 @@ def test_e_c03_missing_percentage_multi_country():
 def test_e_c04_country_and_region_without_percentages():
     a = make_activity(
         recipient_countries=[RecipientCountry("KE", None)],
-        recipient_region_codes=["298"],
-        raw={"recipient_region_percentage": []},
+        recipient_regions=[RecipientRegion("1", "298", None)],
     )
     assert len(run("E-C04", a)) == 1
 
@@ -46,8 +45,7 @@ def test_e_c04_country_and_region_without_percentages():
 def test_e_c04_country_and_region_with_percentages_ok():
     a = make_activity(
         recipient_countries=[RecipientCountry("KE", 50.0)],
-        recipient_region_codes=["298"],
-        raw={"recipient_region_percentage": [50.0]},
+        recipient_regions=[RecipientRegion("1", "298", 50.0)],
     )
     assert run("E-C04", a) == []
 
@@ -92,3 +90,94 @@ def test_w_c10_missing_defaults():
     issues = run("W-C10", a)
     assert len(issues) == 1
     assert issues[0].evidence["missing"] == ["default-flow-type", "default-aid-type"]
+
+
+def test_e_c11_missing_percentage_among_multiple_sectors():
+    a = make_activity(sectors=[Sector("1", "15110", 100.0), Sector("1", "15150", None)])
+    issues = run("E-C11", a)
+    assert len(issues) == 1
+    assert "missing" in issues[0].message
+
+
+def test_e_c11_single_sector_invalid_percentage():
+    assert len(run("E-C11", make_activity(sectors=[Sector("1", "15110", 60.0)]))) == 1
+
+
+def test_e_c11_single_sector_omitted_or_100_ok():
+    assert run("E-C11", make_activity(sectors=[Sector("1", "15110", None)])) == []
+    assert run("E-C11", make_activity(sectors=[Sector("1", "15110", 100.0)])) == []
+
+
+def test_e_c12_single_country_invalid_percentage():
+    a = make_activity(recipient_countries=[RecipientCountry("KE", 60.0)])
+    assert len(run("E-C12", a)) == 1
+
+
+def test_e_c12_single_country_100_ok():
+    a = make_activity(recipient_countries=[RecipientCountry("KE", 100.0)])
+    assert run("E-C12", a) == []
+
+
+def test_e_c13_region_missing_percentage_among_multiple():
+    a = make_activity(
+        recipient_regions=[RecipientRegion("1", "298", 50.0), RecipientRegion("1", "289", None)]
+    )
+    assert len(run("E-C13", a)) == 1
+
+
+def test_e_c13_single_region_invalid_percentage():
+    a = make_activity(recipient_regions=[RecipientRegion("1", "298", 60.0)])
+    assert len(run("E-C13", a)) == 1
+
+
+def test_e_c13_single_region_omitted_or_100_ok():
+    assert run("E-C13", make_activity(recipient_regions=[RecipientRegion("1", "298", None)])) == []
+    assert run("E-C13", make_activity(recipient_regions=[RecipientRegion("1", "298", 100.0)])) == []
+
+
+def test_e_c14_region_percentages_not_100():
+    a = make_activity(
+        recipient_regions=[RecipientRegion("1", "298", 50.0), RecipientRegion("1", "289", 40.0)]
+    )
+    issues = run("E-C14", a)
+    assert len(issues) == 1
+    assert issues[0].evidence["sum"] == 90.0
+
+
+def test_e_c14_region_percentages_100_ok():
+    a = make_activity(
+        recipient_regions=[RecipientRegion("1", "298", 60.0), RecipientRegion("1", "289", 40.0)]
+    )
+    assert run("E-C14", a) == []
+
+
+def test_e_c15_default_language_missing_title():
+    a = make_activity(
+        default_language=None,
+        raw={
+            "title_narrative": ["Title"],
+            "title_narrative_xml_lang": [],
+            "description_narrative_xml_lang": ["en"],
+        },
+    )
+    issues = run("E-C15", a)
+    assert len(issues) == 1
+    assert "title" in issues[0].message
+
+
+def test_e_c15_default_language_missing_description():
+    a = make_activity(
+        default_language=None,
+        raw={
+            "title_narrative": ["Title"],
+            "title_narrative_xml_lang": ["en"],
+            "description_narrative_xml_lang": [],
+        },
+    )
+    issues = run("E-C15", a)
+    assert len(issues) == 1
+    assert "description" in issues[0].message
+
+
+def test_e_c15_default_language_present_ok():
+    assert run("E-C15", make_activity(default_language="en")) == []

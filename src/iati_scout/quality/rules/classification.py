@@ -86,18 +86,18 @@ def country_percentages(a: Activity, ctx: Context) -> Iterator[Issue]:
 
 @rule("E-C04", Severity.ERROR, "Recipient country and region both given without percentages")
 def country_and_region(a: Activity, ctx: Context) -> Iterator[Issue]:
-    if a.recipient_countries and a.recipient_region_codes:
+    if a.recipient_countries and a.recipient_regions:
         country_pcts = [c.percentage for c in a.recipient_countries]
-        region_pcts = a.raw_list("recipient_region_percentage")
-        if any(p is None for p in country_pcts) or len(region_pcts) < len(a.recipient_region_codes):
+        region_pcts = [r.percentage for r in a.recipient_regions]
+        if any(p is None for p in country_pcts) or any(p is None for p in region_pcts):
             yield Issue(
                 f"Both recipient-country ({', '.join(c.code for c in a.recipient_countries)}) and "
-                f"recipient-region ({', '.join(a.recipient_region_codes)}) are given, so each "
-                f"needs a percentage",
+                f"recipient-region ({', '.join(r.code for r in a.recipient_regions)}) are given, so "
+                f"each needs a percentage",
                 {
                     "countries": [c.code for c in a.recipient_countries],
                     "country_percentages": country_pcts,
-                    "regions": a.recipient_region_codes,
+                    "regions": [r.code for r in a.recipient_regions],
                     "region_percentages": region_pcts,
                 },
             )
@@ -176,3 +176,137 @@ def missing_defaults(a: Activity, ctx: Context) -> Iterator[Issue]:
             f"Missing default classification(s): {', '.join(missing)}",
             {"missing": missing},
         )
+
+
+@rule(
+    "E-C11",
+    Severity.ERROR,
+    "DAC sector percentage completeness",
+    "IATI ruleset 2.1.1/2.1.4: when multiple sectors in a vocabulary are declared, "
+    "each must have a percentage; when a single sector is declared, the percentage "
+    "must be omitted or set to 100.",
+)
+def dac_sector_percentage_completeness(a: Activity, ctx: Context) -> Iterator[Issue]:
+    tol = ctx.t("percentage_tolerance")
+    sums = _sector_sums(a)
+    if DAC_SECTOR_VOCABULARY not in sums:
+        return
+    _total, pcts, count = sums[DAC_SECTOR_VOCABULARY]
+    codes = [s.code for s in a.sectors if (s.vocabulary or DAC_SECTOR_VOCABULARY) == DAC_SECTOR_VOCABULARY]
+    if count > 1 and any(p is None for p in pcts):
+        yield Issue(
+            f"{count} DAC sectors declared ({', '.join(codes)}) but a percentage is "
+            f"missing for at least one of them",
+            {"sectors": codes, "percentages": pcts},
+        )
+    elif count == 1 and pcts[0] is not None and abs(pcts[0] - 100) > tol:
+        yield Issue(
+            f"Single DAC sector {codes[0]} has percentage {pcts[0]:g}%, which should "
+            f"be omitted or set to 100",
+            {"sector": codes[0], "percentage": pcts[0]},
+        )
+
+
+@rule(
+    "E-C12",
+    Severity.ERROR,
+    "Single recipient-country percentage neither omitted nor 100",
+    "IATI ruleset 3.1.4: when a single recipient country is declared, the "
+    "percentage must be omitted or set to 100.",
+)
+def single_country_percentage(a: Activity, ctx: Context) -> Iterator[Issue]:
+    tol = ctx.t("percentage_tolerance")
+    if len(a.recipient_countries) == 1:
+        c = a.recipient_countries[0]
+        if c.percentage is not None and abs(c.percentage - 100) > tol:
+            yield Issue(
+                f"Single recipient country {c.code} has percentage {c.percentage:g}%, "
+                f"which should be omitted or set to 100",
+                {"country": c.code, "percentage": c.percentage},
+            )
+
+
+@rule(
+    "E-C13",
+    Severity.ERROR,
+    "Recipient-region percentage completeness",
+    "IATI ruleset 3.4.1/3.4.4: when multiple recipient regions are declared, each "
+    "must have a percentage; when a single region is declared, the percentage must "
+    "be omitted or set to 100.",
+)
+def region_percentage_completeness(a: Activity, ctx: Context) -> Iterator[Issue]:
+    tol = ctx.t("percentage_tolerance")
+    regions = a.recipient_regions
+    codes = [r.code for r in regions]
+    pcts = [r.percentage for r in regions]
+    if len(regions) > 1 and any(p is None for p in pcts):
+        yield Issue(
+            f"{len(regions)} recipient regions declared ({', '.join(codes)}) but a "
+            f"percentage is missing for at least one of them",
+            {"regions": codes, "percentages": pcts},
+        )
+    elif len(regions) == 1 and pcts[0] is not None and abs(pcts[0] - 100) > tol:
+        yield Issue(
+            f"Single recipient region {codes[0]} has percentage {pcts[0]:g}%, which "
+            f"should be omitted or set to 100",
+            {"region": codes[0], "percentage": pcts[0]},
+        )
+
+
+@rule(
+    "E-C14",
+    Severity.ERROR,
+    "Recipient-region percentages do not sum to 100",
+    "IATI ruleset 3.4.2: percentage values for recipient regions must add up to 100%.",
+)
+def region_percentages_sum(a: Activity, ctx: Context) -> Iterator[Issue]:
+    tol = ctx.t("percentage_tolerance")
+    regions = a.recipient_regions
+    pcts = [r.percentage for r in regions]
+    if len(regions) > 1 and all(p is not None for p in pcts):
+        total = sum(pcts)
+        if abs(total - 100) > tol:
+            yield Issue(
+                f"Recipient-region percentages sum to {total:g}% across {len(regions)} "
+                f"regions, expected 100%",
+                {"regions": [r.code for r in regions], "percentages": pcts, "sum": total},
+            )
+
+
+@rule(
+    "E-C15",
+    Severity.ERROR,
+    "Default language missing",
+    "IATI ruleset 4.1.1: the activity should specify a default language OR the "
+    "language must be specified for each narrative element. This check covers the "
+    "title and description narratives only.",
+)
+def default_language_missing(a: Activity, ctx: Context) -> Iterator[Issue]:
+    if a.default_language:
+        return
+    title_langs = a.raw_list("title_narrative_xml_lang")
+    description_langs = a.raw_list("description_narrative_xml_lang")
+    if len(title_langs) < len(a.raw_list("title_narrative")) or any(not lang for lang in title_langs):
+        yield Issue(
+            "No default language (@xml:lang on iati-activity) and the title narrative "
+            "does not specify a language",
+            {"default_language": None, "title_narrative_xml_lang": title_langs},
+        )
+    if len(description_langs) < len(a.descriptions) or any(not lang for lang in description_langs):
+        yield Issue(
+            "No default language (@xml:lang on iati-activity) and at least one "
+            "description narrative does not specify a language",
+            {"default_language": None, "description_narrative_xml_lang": description_langs},
+        )
+
+
+# IATI ruleset 6.2.2/6.6.2/6.7.2 and 3.6.2/3.7.1/3.7.2 (sector and recipient
+# country/region must be declared consistently at activity level OR for every
+# transaction) are NOT implemented: the Datastore's transaction/select schema
+# denormalizes the activity's own sector/recipient-country/recipient-region onto
+# every transaction row regardless of whether the source XML has a genuine
+# per-transaction override, so `sector_code`/`recipient_country_code` is present
+# on effectively every transaction and this check cannot be built reliably from
+# Datastore data alone (verified empirically: 46 732/46 732 RVO transaction rows
+# carry a non-empty, activity-identical sector_code). It would need the raw
+# `/iati` XML per activity.
