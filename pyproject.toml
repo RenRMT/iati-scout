@@ -12,6 +12,7 @@ license = { text = "MIT" }
 dependencies = [
     "requests>=2.31",
     "python-dotenv>=1.0",
+    "pyarrow>=17.0",
 ]
 
 [project.optional-dependencies]
