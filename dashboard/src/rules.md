@@ -44,10 +44,10 @@ const rule = rulesByCodeMap.get(selectedCode);
 </div>
 
 ```js
-const ruleCounts = await sql`
+const ruleCounts = [...(await sql`
   SELECT count(*) AS findings, count(DISTINCT iati_identifier) AS activities
   FROM findings WHERE code = ${selectedCode}
-`;
+`)];
 ```
 
 <div class="grid grid-cols-2">

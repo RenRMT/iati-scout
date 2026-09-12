@@ -11,6 +11,9 @@ import {sectionName, fmtNumber} from "./components/format.js";
 
 ```js
 const rulesDoc = FileAttachment("loaders/rules.json").json();
+```
+
+```js
 const rulesByCodeMap = new Map(rulesDoc.rules.map((r) => [r.code, r]));
 ```
 
@@ -56,7 +59,7 @@ const qLike = `%${qTrimmed}%`;
 Filters below are combined with AND; each is skipped when left at its "all" / empty default.
 
 ```js
-const total = await sql`
+const total = [...(await sql`
   SELECT count(*) AS n
   FROM findings
   WHERE (${severity} = 'all' OR severity = ${severity})
@@ -64,7 +67,7 @@ const total = await sql`
     AND (${ruleCode} = 'all' OR code = ${ruleCode})
     AND (${includeSystemic} OR NOT systemic)
     AND (${qTrimmed} = '' OR message ILIKE ${qLike} OR iati_identifier ILIKE ${qLike})
-`;
+`)];
 ```
 
 ```js

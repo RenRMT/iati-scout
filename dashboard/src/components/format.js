@@ -29,8 +29,13 @@ export function fmtPercent(fraction) {
   return fraction == null ? "–" : `${(fraction * 100).toFixed(0)}%`;
 }
 
-export function fmtDate(iso) {
-  return iso ? iso.slice(0, 10) : "–";
+export function fmtDate(value) {
+  // Plain JSON-sourced dates arrive as ISO strings; the same field read back through a
+  // DuckDB query (activities.json registered as a SQL table) comes back as a JS Date,
+  // since DuckDB auto-detects and types date-like strings on ingest.
+  if (!value) return "–";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
 }
 
 // Mirrors `d_portal_activity_url` in iati_scout/quality/findings.py.
