@@ -173,6 +173,27 @@ layer** — it only reads the `export/` files and never imports `iati_scout`. Se
 [dashboard/README.md](dashboard/README.md) for how to run it (`cd dashboard && npm install && npm
 run dev`) and its data contract.
 
+### Publishing to GitHub Pages
+
+[.github/workflows/deploy-dashboard.yml](.github/workflows/deploy-dashboard.yml) rebuilds the
+dashboard from fresh Datastore data and publishes it to GitHub Pages, on a weekly schedule
+(Monday 03:00 UTC) or on demand (Actions tab → "Deploy dashboard to GitHub Pages" → Run workflow).
+It runs `fetch` and `check` to regenerate `export/` from scratch, then `npm run build`, then
+deploys `dashboard/dist/` — the site always reflects live IATI Datastore data, not a stale
+snapshot in the repo.
+
+One-time setup:
+
+- **Settings → Pages → Source: GitHub Actions.**
+- **Settings → Secrets and variables → Actions → New repository secret**: `IATI_API_KEY` (your
+  Datastore subscription key).
+- **Settings → Secrets and variables → Actions → Variables → New repository variable**:
+  `IATI_ORG_ID` (e.g. `NL-KVK-27378529`).
+
+Framework's build output uses relative asset and page links throughout, so it works unmodified
+from GitHub's project-site subpath (`https://<user>.github.io/iati-scout/`) — no `base` config
+needed.
+
 ### Caveat: nested elements
 
 The Datastore's flattened JSON keeps sibling arrays aligned for flat repeats (transactions,
