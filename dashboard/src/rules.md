@@ -6,7 +6,7 @@ sql:
 ---
 
 ```js
-import {sectionName, severityColor, fmtNumber} from "./components/format.js";
+import {categoryName, sourceName, severityColor, fmtNumber} from "./components/format.js";
 ```
 
 ```js
@@ -27,7 +27,7 @@ const selectedCode = view(
   Inputs.select(ruleCodes, {
     value: defaultCode,
     label: "Rule",
-    format: (d) => `${d} — ${rulesByCodeMap.get(d).title}`,
+    format: (d) => `${d} — ${rulesByCodeMap.get(d).title}`.slice(0, 90),
   })
 );
 ```
@@ -39,8 +39,8 @@ const rule = rulesByCodeMap.get(selectedCode);
 <div class="card">
   <h2>${rule.code} <span style="color: ${severityColor(rule.severity)}">${rule.severity}</span></h2>
   <h3>${rule.title}</h3>
-  <p>${rule.description || "No further description."}</p>
-  <p class="muted">Section ${rule.section} — ${sectionName(rule.section)} ${rule.systemic ? "· flagged as a systemic publisher pattern" : ""} ${rule.enabled ? "" : "· disabled in rules.toml"}</p>
+  <p>${rule.description || (rule.source === "validator" ? "Defined by the official IATI standard ruleset." : "No further description.")}</p>
+  <p class="muted">${sourceName(rule.source)} · ${categoryName(rule.category)}${rule.source === "scout" ? ` · scout weight: ${rule.weight}` : ""} ${rule.systemic ? "· flagged as a systemic publisher pattern" : ""} ${rule.enabled ? "" : "· disabled in rules.toml"}</p>
 </div>
 
 ```js
@@ -60,7 +60,7 @@ const ruleCounts = [...(await sql`
 ```js
 const topActivities = await sql`
   SELECT a.identifier, a.title, a.url_d_portal, count(*) AS findings
-  FROM findings f JOIN activities a ON a.identifier = f.iati_identifier
+  FROM findings f LEFT JOIN activities a ON a.identifier = f.iati_identifier
   WHERE f.code = ${selectedCode}
   GROUP BY a.identifier, a.title, a.url_d_portal
   ORDER BY findings DESC
@@ -72,7 +72,7 @@ const topActivities = await sql`
 Inputs.table([...topActivities], {
   columns: ["identifier", "title", "findings", "url_d_portal"],
   header: {identifier: "Activity", title: "Title", findings: "Findings", url_d_portal: "d-portal"},
-  format: {url_d_portal: (u) => html`<a href=${u} target="_blank" rel="noopener">Open ↗</a>`},
+  format: {url_d_portal: (u) => (u ? html`<a href=${u} target="_blank" rel="noopener">Open ↗</a>` : "")},
   width: {title: 320},
 })
 ```
@@ -82,7 +82,7 @@ Inputs.table([...topActivities], {
 ```js
 const findingRows = await sql`
   SELECT f.iati_identifier, f.message, f.systemic, a.title AS activity_title, a.url_d_portal
-  FROM findings f JOIN activities a ON a.identifier = f.iati_identifier
+  FROM findings f LEFT JOIN activities a ON a.identifier = f.iati_identifier
   WHERE f.code = ${selectedCode}
   ORDER BY f.iati_identifier
   LIMIT 500
@@ -103,7 +103,7 @@ Inputs.table([...findingRows], {
   },
   format: {
     systemic: (d) => (d ? "yes" : ""),
-    url_d_portal: (u) => html`<a href=${u} target="_blank" rel="noopener">Open ↗</a>`,
+    url_d_portal: (u) => (u ? html`<a href=${u} target="_blank" rel="noopener">Open ↗</a>` : ""),
   },
   width: {message: 420, activity_title: 260},
   rows: 15,

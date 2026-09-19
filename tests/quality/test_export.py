@@ -5,33 +5,80 @@ import pyarrow.parquet as pq
 
 from iati_scout.quality.export import SCHEMA_VERSION, write_export
 from iati_scout.quality.registry import RuleConfig
-from iati_scout.quality.runner import run_checks, select_rules
+from iati_scout.quality.runner import findings_from_reports, run_checks, select_rules
 
 from .conftest import make_activity, make_dataset
 
+# A minimal official validator report, shaped exactly like the live API's, so
+# the export is exercised with findings from both sources.
+VALIDATOR_REPORT = {
+    "registry_name": "xx-test",
+    "registry_id": "abc-123",
+    "registry_hash": "deadbeef",
+    "document_url": "https://example.org/iati.xml",
+    "valid": True,
+    "report": {
+        "valid": True,
+        "fileType": "iati-activities",
+        "iatiVersion": "2.03",
+        "apiVersion": "2.5.0",
+        "rulesetCommitSha": "2cd1a14f6c",
+        "codelistCommitSha": "ba76c3118d",
+        "orgIdPrefixFileName": "org-id-74880323ea.json",
+        "summary": {"critical": 0, "error": 1, "warning": 0, "advisory": 0},
+        "errors": [
+            {
+                "identifier": "XX-TEST-1-A",
+                "title": "Test activity",
+                "errors": [
+                    {
+                        "category": "financial",
+                        "errors": [
+                            {
+                                "id": "7.5.3",
+                                "severity": "error",
+                                "message": "Budget Period must not be longer than one year.",
+                                "context": [{"text": "period-end at line: 49"}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    },
+}
+
 
 def _dataset_with_findings():
-    # actual end before actual start -> E-A01 (error); status Implementation
-    # but planned end long passed -> W-A07 (warning).
+    # Status Implementation (2) with an actual end date -> E-A05; planned end
+    # long past -> W-A07. Both are scout rules, so both arrive as `advisory`.
     activity = make_activity(
         status="2",
         dates={
             "1": date(2020, 1, 1),
-            "2": date(2020, 5, 4),
+            "2": date(2020, 3, 24),
             "3": date(2021, 12, 31),
-            "4": date(2020, 3, 24),
+            "4": date(2022, 5, 4),
         },
     )
     ds = make_dataset(activity)
-    config = RuleConfig(systemic={"E-A01": True})
+    config = RuleConfig(systemic={"E-A05": True})
     rules = select_rules(config)
-    findings = run_checks(ds, config, rules)
+    findings = findings_from_reports([VALIDATOR_REPORT]) + run_checks(ds, config, rules)
     return ds, config, rules, findings
 
 
 def test_write_export_files(tmp_path):
     ds, config, rules, findings = _dataset_with_findings()
-    paths = write_export(findings, rules, config, ds, tmp_path, raw_manifest={"fetched_at": "2026-01-01T00:00:00Z"})
+    paths = write_export(
+        findings,
+        rules,
+        config,
+        ds,
+        tmp_path,
+        raw_manifest={"fetched_at": "2026-01-01T00:00:00Z"},
+        validator_reports=[VALIDATOR_REPORT],
+    )
 
     assert set(paths) == {"meta", "rules", "summary", "activities", "findings"}
     for p in paths.values():
@@ -44,25 +91,39 @@ def test_write_export_files(tmp_path):
     assert meta["fetched_at"] == "2026-01-01T00:00:00Z"
     assert meta["activity_count"] == len(ds)
     assert meta["rules_run"] == [r.code for r in rules]
+    # The official ruleset version the validator findings came from is pinned.
+    assert meta["validator"]["ruleset_commit_sha"] == "2cd1a14f6c"
+    assert meta["validator"]["iati_version"] == "2.03"
+    assert meta["validator"]["documents"][0]["registry_name"] == "xx-test"
 
     rules_json = json.loads(paths["rules"].read_text(encoding="utf-8"))
-    codes = {r["code"] for r in rules_json["rules"]}
-    assert "E-A01" in codes
-    e_a01 = next(r for r in rules_json["rules"] if r["code"] == "E-A01")
-    assert e_a01["severity"] == "error"
-    assert e_a01["systemic"] is True
+    by_code = {r["code"]: r for r in rules_json["rules"]}
+    assert by_code["E-A05"]["severity"] == "advisory"
+    assert by_code["E-A05"]["source"] == "scout"
+    assert by_code["E-A05"]["weight"] == "error"  # scout's own confidence signal
+    assert by_code["E-A05"]["category"] == "iati"
+    assert by_code["E-A05"]["systemic"] is True
+    # Validator rules enter the catalogue from the report, not the registry.
+    assert by_code["7.5.3"]["source"] == "validator"
+    assert by_code["7.5.3"]["severity"] == "error"
     assert "thresholds" in rules_json
 
     summary = json.loads(paths["summary"].read_text(encoding="utf-8"))
     assert summary["totals"]["findings"] == len(findings)
-    assert summary["totals"]["errors"] + summary["totals"]["warnings"] == len(findings)
-    assert summary["per_rule"]["E-A01"]["findings"] == 1
-    assert summary["per_rule"]["E-A01"]["activities"] == 1
+    assert summary["totals"]["error"] == 1
+    assert summary["totals"]["advisory"] == len(findings) - 1
+    assert summary["per_rule"]["E-A05"]["findings"] == 1
+    assert summary["per_rule"]["E-A05"]["activities"] == 1
+    assert summary["per_source"] == {"validator": 1, "scout": len(findings) - 1}
+    assert summary["per_category"]["financial"] == 1
 
     activities = json.loads(paths["activities"].read_text(encoding="utf-8"))
     assert len(activities) == len(ds)
     row = next(a for a in activities if a["identifier"] == "XX-TEST-1-A")
-    assert row["errors"] >= 1
+    assert row["advisory"] >= 1
+    assert row["error"] == 1
+    assert row["validator_findings"] == 1
+    assert row["scout_findings"] >= 1
     assert row["url_d_portal"].startswith("https://d-portal.iatistandard.org/")
 
 
@@ -75,9 +136,12 @@ def test_findings_parquet_round_trips(tmp_path):
     assert set(table.column_names) >= {
         "code",
         "severity",
+        "category",
+        "source",
         "systemic",
         "iati_identifier",
         "message",
+        "context",
         "evidence",
         "item",
         "item_kind",
@@ -86,26 +150,31 @@ def test_findings_parquet_round_trips(tmp_path):
     }
 
     rows = table.to_pylist()
-    e_a01 = next(r for r in rows if r["code"] == "E-A01")
-    assert e_a01["severity"] == "error"
-    assert e_a01["systemic"] is True
-    assert e_a01["iati_identifier"] == "XX-TEST-1-A"
-    evidence = json.loads(e_a01["evidence"])
-    assert evidence["actual_start"] == "2020-05-04"
-    assert e_a01["item"] is None
-    assert e_a01["item_kind"] is None
+    scout = next(r for r in rows if r["code"] == "E-A05")
+    assert scout["severity"] == "advisory"
+    assert scout["source"] == "scout"
+    assert scout["category"] == "iati"
+    assert scout["systemic"] is True
+    assert scout["iati_identifier"] == "XX-TEST-1-A"
+    assert json.loads(scout["evidence"])["actual_end"] == "2022-05-04"
+    assert scout["item"] is None
+    assert scout["item_kind"] is None
+
+    validator = next(r for r in rows if r["code"] == "7.5.3")
+    assert validator["severity"] == "error"
+    assert validator["source"] == "validator"
+    assert validator["context"] == "period-end at line: 49"
+    assert json.loads(validator["evidence"]) == {}
 
 
 def test_export_item_locator_for_row_level_finding(tmp_path):
-    # A budget-level rule (E-B01: period end before start) carries an `item` locator.
+    # A budget-level rule (E-B03: negative budget value) carries an `item` locator.
     from .conftest import make_budget
 
-    activity = make_activity(
-        budgets=[make_budget(start=date(2025, 6, 1), end=date(2025, 1, 1))]
-    )
+    activity = make_activity(budgets=[make_budget(value=-1.0)])
     ds = make_dataset(activity)
     config = RuleConfig()
-    rules = select_rules(config, codes=["E-B01"])
+    rules = select_rules(config, codes=["E-B03"])
     findings = run_checks(ds, config, rules)
     assert len(findings) == 1
 
@@ -115,4 +184,4 @@ def test_export_item_locator_for_row_level_finding(tmp_path):
     assert row["item_kind"] == "budget"
     assert row["item_index"] == 0
     item = json.loads(row["item"])
-    assert item["period_start"] == "2025-06-01"
+    assert item["period_start"] == "2025-01-01"

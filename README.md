@@ -5,19 +5,22 @@ Aid Transparency Initiative) data for a given organisation.
 
 ## Status
 
-Two commands so far:
+Three commands:
 
 - `iati-scout fetch` pulls all `activity`, `transaction`, and `budget` records for one configurable
   IATI organisation identifier from the
   [IATI Datastore](https://iatistandard.org/en/iati-tools-and-resources/iati-datastore/) API and
   stores them as JSON Lines files in the project directory.
-- `iati-scout check` runs a catalogue of **data-quality rules** over the fetched data and writes
-  findings (JSONL, CSV, Markdown summary). The rules go beyond schema/codelist validation: they look
-  for logical inconsistencies between fields (errors) and combinations that suggest a problem
-  worth a human look (warnings).
+- `iati-scout validate` fetches the **official IATI validation report** for every document the
+  organisation has registered, via the [IATI Validator](https://validator.iatistandard.org/) API.
+- `iati-scout check` merges that report with iati-scout's **additional** rules — the checks IATI
+  does not make — and writes the result in the validator's own report format.
 
-Data refresh strategies and a UI are out of scope for now; the findings format is designed so a
-dashboard can be built on it later.
+iati-scout does not re-implement the IATI standard ruleset. IATI publishes a validation report for
+every registered document; that report is the source of truth for whether data conforms to the
+standard. What this tool adds are cross-field and cross-activity checks that a conforming file can
+still fail: money that does not add up, children that outlive their parents, closed activities with
+no results.
 
 ## Setup
 
@@ -77,62 +80,85 @@ activity/transaction/budget). `manifest.json` records the fetch time, tool versi
 
 `data/` is gitignored — fetched data stays local to your machine.
 
+## Official IATI validation
+
+```
+python -m iati_scout validate --org-id NL-KVK-27378529
+python -m iati_scout validate --list-documents          # what does this publisher register?
+```
+
+Two hops. First the [IATI Registry](https://iatiregistry.org/) is asked which documents the
+organisation publishes (a publisher often has more than one — RVO registers two activity files).
+Then the [IATI Validator](https://validator.iatistandard.org/) API is asked for the **stored**
+report for each. IATI validates registered documents on its own schedule; this endpoint reads the
+result back, so the call is cheap and there is no way to force a refresh through it. A document
+IATI has not processed yet is skipped with a warning rather than failing the run.
+
+Reports are cached verbatim under `data/validation/<org_id>/`, one file per document plus a
+`manifest.json` recording the `rulesetCommitSha` and `codelistCommitSha` each was produced
+against — IATI versions the ruleset independently of this tool, so pinning it is what keeps an
+old run auditable.
+
+This uses the same `IATI_API_KEY` as `fetch` (the APIM subscription covers both products).
+
 ## Data-quality checks
 
 ```
 python -m iati_scout check --org-id NL-KVK-27378529
-python -m iati_scout check --list-rules                 # print the catalogue
-python -m iati_scout check --rules E-A01,W-B14          # run a subset
-python -m iati_scout check --severity error             # errors only
+python -m iati_scout check --list-rules                 # print the scout rule catalogue
+python -m iati_scout check --rules W-B12,W-B14          # run a subset of scout rules
+python -m iati_scout check --category financial         # one official category only
+python -m iati_scout check --no-validator               # scout rules only, no report needed
 ```
 
-No API key is needed; `check` reads `data/raw/<org_id>/` written by `fetch`.
+`check` reads `data/raw/<org_id>/` (from `fetch`) and `data/validation/<org_id>/` (from
+`validate`), and merges the two into one report. No API key is needed.
 
-### Rule catalogue
+### What comes from where
 
-Codes are `E-<section><nn>` for **errors** (deterministic logical inconsistencies; should be
-fixed) and `W-<section><nn>` for **warnings** (patterns that indicate a likely issue; need
-follow-up). Sections:
+| | Source | Severity | Covers |
+|---|---|---|---|
+| **Standard conformance** | official IATI Validator | `critical` / `error` / `warning` / `advisory` | the [IATI standard ruleset](https://iatistandard.org/en/iati-standard/203/rulesets/standard-ruleset/), codelists, schema |
+| **Everything else** | iati-scout rules | always `advisory` | cross-field and cross-activity consistency IATI does not check |
 
-| Section | Covers | Examples |
+Every scout rule reports as `advisory`: the validator's `error` and `warning` mean *violates the
+published IATI standard*, which a heuristic by definition does not. Note that the validator also
+emits `advisory` (its 1000.x linked-activity checks), so **severity alone does not identify the
+source** — every finding carries a `source` field (`validator` or `scout`) for that. Rule ids
+cannot collide either: official ids are dotted numbers (`7.5.3`), scout codes are alphabetic
+(`W-B12`).
+
+### Scout rule catalogue
+
+53 rules. The `E-`/`W-` prefix is scout's own confidence signal — `E-` for a deterministic
+inconsistency, `W-` for a pattern that needs a human look — exposed as `weight`, since `severity`
+is now fixed at `advisory`. Rules are grouped into the official category vocabulary:
+
+| Section | Category | Covers |
 |---|---|---|
-| A | Activity dates & status | actual end before actual start; status Implementation but planned end long passed |
-| B | Financial consistency | negative budgets; budget period > 1 year; disbursed more than committed; transactions outside activity dates; receiver = reporting org |
-| C | Classification | sector/country percentages ≠ 100; gender sector without gender marker; home country as recipient |
-| D | Hierarchy & relations | related activity not in dataset; child dates outside parent dates; identifier published twice |
-| E | Organisations | no funding/accountable org; same org twice in one role; org type "Other" |
-| F | Text & locations | unparseable coordinates; location in home country while recipient differs; truncated descriptions |
-| G | Results | non-numeric indicator values; closed activity without results |
-| H | Identifier hygiene | activity id equals reporting-org id; identifier whitespace or forbidden symbols |
+| A | `iati` | pipeline activity with transactions; implementation status with an actual end date; stale activities |
+| B | `financial` | negative budgets; disbursed more than committed; transactions outside activity dates; receiver = reporting org; duplicate and outlier transactions |
+| C | `classifications` | gender sector without a gender marker; home country as recipient; missing default classification |
+| D | `relations` | related activity not in the dataset; child dates outside parent dates; identifier published twice; child country not in parent's |
+| E | `participating` | no funding/accountable org; same org twice in one role; org type "Other" |
+| F | `geo` / `information` | unparseable or out-of-range coordinates; location in home country while recipient differs; truncated or duplicated descriptions |
+| G | `performance` | closed activity without results; closed activity with targets but no actuals |
 
-Run `--list-rules` for the full list with titles. Rules are pure functions in
+Run `--list-rules` for the full list. Rules are pure functions in
 [src/iati_scout/quality/rules/](src/iati_scout/quality/rules/); adding one means registering a
-function with `@rule(code, severity, title)` and adding a test.
+function with `@rule(code, category, title)` and adding a test.
 
-### Coverage of the IATI standard ruleset
+### What iati-scout deliberately does not check
 
-Sections A–H also cover most of the [IATI standard
-ruleset](https://iatistandard.org/en/iati-standard/203/rulesets/standard-ruleset/) — the
-official set of cross-field validation rules (distinct from codelist/schema validation, which
-the IATI Validator already covers before data is published). Rules ported from it carry the
-matching ruleset ID in their `description` (see `--list-rules` or `rules.json` in the dashboard
-export). Deliberately not implemented, because this tool doesn't fetch or model the data they'd
-need:
-
-- Rules scoped to the `iati-organisations` registration file (this tool only processes
-  `activity`/`transaction`/`budget` data for one reporting organisation)
-- The approved reporting-organisation agency-code prefix check (needs an external codelist)
-- Result-level-vs-indicator-level reference placement, and sector/recipient-country consistency
-  between activity and transaction level — the Datastore's flattened schema loses the nesting
-  (or, for the latter, denormalizes the activity's own sector/country onto every transaction row,
-  making a genuine per-transaction override indistinguishable from inherited data)
-- A handful of niche identifier fields (`other-identifier`/`owner-org`, transaction-level
-  `provider-activity-id`/`receiver-activity-id`)
+Anything in the IATI standard ruleset — that is the validator's job now, and re-implementing a
+rule would mean reporting the same violation twice from two sources that can drift apart. A test
+([tests/quality/test_all_rules.py](tests/quality/test_all_rules.py)) pins the 26 rule codes that
+were removed when this tool switched over, so one cannot quietly come back.
 
 ### Configuration: `rules.toml`
 
-[rules.toml](rules.toml) holds thresholds (staleness, budget period limits, outlier percentile, …)
-and per-rule switches:
+[rules.toml](rules.toml) holds thresholds (staleness, budget period limits, outlier percentile, ...)
+and per-rule switches for **scout rules only** — the official report is taken as published:
 
 ```toml
 [rules."W-C09"]
@@ -147,21 +173,34 @@ the output, flagged, so a report can collapse them to a count instead of thousan
 ### Output
 
 ```
-data/quality/<org_id>/
-├── findings.jsonl   # canonical: one self-contained finding per line
-├── findings.csv     # same, flattened for spreadsheets
-├── summary.md       # counts per rule + sample findings with links
-└── export/          # machine-readable contract for the dashboard (see below)
+data/validation/<org_id>/   # from `validate`
+├── <registry-name>.json    # the official report, verbatim, one per document
+└── manifest.json           # document urls, hashes, ruleset/codelist commit shas
+
+data/quality/<org_id>/      # from `check`
+├── report.json             # canonical: both sources, in the official report format
+├── findings.csv            # flattened, one row per finding, for spreadsheets
+├── summary.md              # counts and samples for a human
+└── export/                 # machine-readable contract for the dashboard (see below)
 ```
 
-Every finding carries: rule code/severity/title, activity identifier and title, a message that
-quotes the offending values, a structured `evidence` dict with those values, an `item` locator
-for transaction/budget-level findings, `related` activities (e.g. the parent, with its own link),
-and `urls` — a [d-portal](https://d-portal.iatistandard.org/) link to the activity plus the
-Datastore query.
+`report.json` follows the [IATI Validator API
+Contract](https://cdn.iatistandard.org/prod-iati-website/documents/IATI_Validator_API_Contract.pdf):
+the same `report.summary` / `report.errors` shape, nested activity -> category -> error, so
+anything that already reads an IATI validation report can read it.
 
-`check` also writes `data/quality/<org_id>/export/` (skip with `--no-export`) — a smaller,
-columnar version of the same findings (Parquet + JSON) for the dashboard below. See
+Scout's additions are namespaced rather than mixed in, so a consumer that only knows the official
+schema still parses the file correctly:
+
+- a top-level `scout` block with run metadata (org, tool version, per-source counts, the documents
+  validated, and any activities that are published but absent from the Datastore);
+- per-finding extras under the contract's free-form `details` object — `source`, `rule_title`,
+  `systemic`, a structured `evidence` dict quoting the offending values, an `item` locator for
+  transaction/budget-level findings, `related` activities, and `urls` (a
+  [d-portal](https://d-portal.iatistandard.org/) link plus the Datastore query).
+
+`check` also writes `data/quality/<org_id>/export/` (skip with `--no-export`) — a columnar version
+of the same findings (Parquet + JSON) for the dashboard below. See
 [src/iati_scout/quality/export.py](src/iati_scout/quality/export.py) for the exact file contract.
 
 ## Dashboard
@@ -178,9 +217,9 @@ run dev`) and its data contract.
 [.github/workflows/deploy-dashboard.yml](.github/workflows/deploy-dashboard.yml) rebuilds the
 dashboard from fresh Datastore data and publishes it to GitHub Pages, on a weekly schedule
 (Monday 03:00 UTC) or on demand (Actions tab → "Deploy dashboard to GitHub Pages" → Run workflow).
-It runs `fetch` and `check` to regenerate `export/` from scratch, then `npm run build`, then
-deploys `dashboard/dist/` — the site always reflects live IATI Datastore data, not a stale
-snapshot in the repo.
+It runs `fetch`, `validate` and `check` to regenerate `export/` from scratch, then
+`npm run build`, then deploys `dashboard/dist/` — the site always reflects live IATI Datastore
+data and the current official validation report, not a stale snapshot in the repo.
 
 One-time setup:
 
@@ -194,12 +233,20 @@ Framework's build output uses relative asset and page links throughout, so it wo
 from GitHub's project-site subpath (`https://<user>.github.io/iati-scout/`) — no `base` config
 needed.
 
-### Caveat: nested elements
+### Caveat: two views of the same publisher
 
-The Datastore's flattened JSON keeps sibling arrays aligned for flat repeats (transactions,
+The two sources do not read the same bytes. The validator reads the publisher's **XML** directly,
+so its findings carry line and column numbers and cover every activity in the file. Scout rules
+read the **Datastore's** ingested copy, which can lag behind or drop activities — for RVO, 23
+activities appear in the validated XML but not in the Datastore. Those identifiers are listed
+under `scout.activities_not_in_datastore` in `report.json` rather than being silently folded into
+the totals.
+
+The Datastore's flattened JSON also keeps sibling arrays aligned for flat repeats (transactions,
 budgets, sectors, dates, participating orgs) but loses nesting for result → indicator → period
 and document-link. Section G rules are therefore activity-level; rules that need "this period
-belongs to this indicator" would require the `/iati` XML endpoint.
+belongs to this indicator" would require the `/iati` XML endpoint. This is one reason to let IATI
+run the ruleset: the validator sees the nesting, and this tool does not.
 
 ## Development
 
@@ -210,7 +257,21 @@ ruff check src tests
 
 Datastore requests are mocked in tests (no network access, no API key required).
 
-## Notes on the Datastore API
+## Notes on the IATI APIs
+
+### Validator (`iati-scout validate`)
+
+- Which documents a publisher registers:
+  `GET https://iatiregistry.org/api/3/action/package_search?fq=publisher_iati_id:<ORG_ID>`.
+  The Registry runs a CKAN *compatibility layer*, not full CKAN — only `organization`,
+  `owner_org`, `publisher_iati_id` and `extras_filetype` are accepted inside `q`/`fq`, and the
+  value must **not** be quoted: `publisher_iati_id:"X"` silently returns zero results while
+  `publisher_iati_id:X` matches.
+- The stored report: `GET https://api.iatistandard.org/validator/report?id=<registry_id>` with
+  the `Ocp-Apim-Subscription-Key` header. `url`, `hash` and `name` also work as lookup keys.
+- The same key is rate-limited like the Datastore's, so `validate` retries 429s with backoff.
+
+### Datastore (`iati-scout fetch`)
 
 - Base URL: `https://api.iatistandard.org/datastore/{activity,transaction,budget}/select`
   (Solr `select` handler).

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from iati_scout.quality.findings import Issue, Severity
+from iati_scout.quality.findings import Category, Issue
 from iati_scout.quality.model import Activity
 from iati_scout.quality.registry import Context, rule
 
@@ -19,7 +19,7 @@ def _parse_pos(pos: str) -> tuple[float, float] | None:
         return None
 
 
-@rule("E-F01", Severity.ERROR, "Location coordinates not parseable")
+@rule("E-F01", Category.GEO, "Location coordinates not parseable")
 def location_pos_malformed(a: Activity, ctx: Context) -> Iterator[Issue]:
     for pos in a.location_positions:
         if _parse_pos(pos) is None:
@@ -29,7 +29,7 @@ def location_pos_malformed(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("E-F02", Severity.ERROR, "Location coordinates out of range or (0, 0)")
+@rule("E-F02", Category.GEO, "Location coordinates out of range or (0, 0)")
 def location_pos_out_of_range(a: Activity, ctx: Context) -> Iterator[Issue]:
     for pos in a.location_positions:
         parsed = _parse_pos(pos)
@@ -45,7 +45,7 @@ def location_pos_out_of_range(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-F03", Severity.WARNING, "Location in home country while recipient country differs")
+@rule("W-F03", Category.GEO, "Location in home country while recipient country differs")
 def location_in_home_country(a: Activity, ctx: Context) -> Iterator[Issue]:
     home = ctx.t("home_country")
     if any(c.code == home for c in a.recipient_countries):
@@ -65,7 +65,7 @@ def location_in_home_country(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-F04", Severity.WARNING, "Title quality")
+@rule("W-F04", Category.INFORMATION, "Title quality")
 def title_quality(a: Activity, ctx: Context) -> Iterator[Issue]:
     title = a.title
     if len(title.strip()) < ctx.t("title_min_length"):
@@ -82,7 +82,7 @@ def title_quality(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-F05", Severity.WARNING, "Description quality")
+@rule("W-F05", Category.INFORMATION, "Description quality")
 def description_quality(a: Activity, ctx: Context) -> Iterator[Issue]:
     min_len = ctx.t("description_min_length")
     trunc_lengths = set(ctx.t("truncation_lengths"))

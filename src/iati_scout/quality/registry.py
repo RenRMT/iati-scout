@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from iati_scout.config import PROJECT_ROOT
-from iati_scout.quality.findings import Issue, Severity
+from iati_scout.quality.findings import Category, Issue, Severity
 from iati_scout.quality.model import Activity, Dataset
 
 DEFAULT_RULES_PATH = PROJECT_ROOT / "rules.toml"
@@ -50,31 +50,60 @@ class Context:
 RuleFn = Callable[[Activity, Context], Iterator[Issue]]
 
 
+# Scout sections map onto the official category vocabulary so that scout and
+# validator findings group together in the report. Section F is split per rule:
+# coordinate checks are `geo`, title/description checks are `information`.
+SECTION_CATEGORIES: dict[str, Category] = {
+    "A": Category.IATI,
+    "B": Category.FINANCIAL,
+    "C": Category.CLASSIFICATIONS,
+    "D": Category.RELATIONS,
+    "E": Category.PARTICIPATING,
+    "F": Category.GEO,
+    "G": Category.PERFORMANCE,
+}
+
+
 @dataclass(frozen=True)
 class RuleSpec:
+    """A scout rule.
+
+    Every scout rule reports at `Severity.ADVISORY`: the validator's error and
+    warning levels mean "violates the published IATI standard", which a scout
+    heuristic by definition does not. `weight` keeps the old error/warning
+    distinction as scout's own confidence signal, since severity can no longer
+    carry it — it is derived from the rule code's `E-`/`W-` prefix.
+    """
+
     code: str
-    severity: Severity
+    category: Category
     title: str
     func: RuleFn
     description: str = ""
+    severity: Severity = Severity.ADVISORY
 
     @property
     def section(self) -> str:
         # "E-A01" -> "A"
         return self.code.split("-", 1)[1][0]
 
+    @property
+    def weight(self) -> str:
+        # "E-A01" -> "error"; scout's own confidence, not an IATI severity.
+        return "error" if self.code.startswith("E-") else "warning"
+
 
 _REGISTRY: dict[str, RuleSpec] = {}
 
 
-def rule(code: str, severity: Severity, title: str, description: str = ""):
+def rule(code: str, category: Category, title: str, description: str = ""):
     """Register a rule function `(activity, ctx) -> Iterator[Issue]`."""
 
     def decorator(func: RuleFn) -> RuleFn:
         if code in _REGISTRY:
             raise ValueError(f"Duplicate rule code {code}")
         _REGISTRY[code] = RuleSpec(
-            code=code, severity=severity, title=title, func=func, description=description
+            code=code, category=category, title=title, func=func, description=description
         )
         return func
 

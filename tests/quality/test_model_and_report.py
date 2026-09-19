@@ -2,11 +2,13 @@ import json
 from datetime import date
 from pathlib import Path
 
-from iati_scout.quality.findings import Severity, d_portal_activity_url
+from iati_scout.quality.findings import Category, Severity, Source, d_portal_activity_url
 from iati_scout.quality.model import load_dataset
 from iati_scout.quality.registry import RuleConfig, all_rules, load_rule_config
-from iati_scout.quality.report import write_reports
-from iati_scout.quality.runner import run_checks, select_rules
+from iati_scout.quality.report import build_report, write_reports
+from iati_scout.quality.runner import findings_from_reports, run_checks, select_rules
+
+from .test_export import VALIDATOR_REPORT
 
 
 def _write_jsonl(path: Path, docs: list[dict]) -> None:
@@ -132,35 +134,158 @@ def test_run_checks_and_reports(tmp_path):
     ds = load_dataset(_org_dir(tmp_path), "XX-TEST-1", today=date(2026, 9, 11))
     config = RuleConfig(systemic={"W-C09": True})
     rules = select_rules(config)
-    findings = run_checks(ds, config, rules)
+    findings = findings_from_reports([VALIDATOR_REPORT]) + run_checks(ds, config, rules)
     codes = {f.code for f in findings}
-    assert {"E-A01", "E-D05", "W-E04"} <= codes
+    assert {"E-D05", "W-E04", "7.5.3"} <= codes
 
     out = tmp_path / "quality"
-    paths = write_reports(findings, rules, "XX-TEST-1", len(ds), out)
-    assert paths["jsonl"].exists() and paths["csv"].exists() and paths["summary"].exists()
-
-    lines = paths["jsonl"].read_text(encoding="utf-8").splitlines()
-    assert len(lines) == len(findings)
-    first = json.loads(lines[0])
-    assert first["urls"]["d_portal"].startswith("https://d-portal.iatistandard.org/")
+    paths = write_reports(
+        findings,
+        rules,
+        "XX-TEST-1",
+        len(ds),
+        out,
+        validator_reports=[VALIDATOR_REPORT],
+        known_identifiers={a.identifier for a in ds},
+    )
+    assert paths["report"].exists() and paths["csv"].exists() and paths["summary"].exists()
 
     summary = paths["summary"].read_text(encoding="utf-8")
-    assert "| E-A01 |" in summary
+    assert "E-D05 — Activity identifier published more than once" in summary
     assert "ctrack.html#view=act&aid=XX-TEST-1-C" in summary
+    # Each source gets its own table, so a reader can tell them apart at a glance.
+    assert "## Official IATI validator findings" in summary
+    assert "## Additional iati-scout findings" in summary
+
+
+def test_report_json_matches_the_official_shape(tmp_path):
+    """`report.json` must be readable by anything that reads an IATI validator report."""
+    ds = load_dataset(_org_dir(tmp_path), "XX-TEST-1", today=date(2026, 9, 11))
+    config = RuleConfig()
+    rules = select_rules(config)
+    findings = findings_from_reports([VALIDATOR_REPORT]) + run_checks(ds, config, rules)
+
+    paths = write_reports(
+        findings,
+        rules,
+        "XX-TEST-1",
+        len(ds),
+        tmp_path / "quality",
+        validator_reports=[VALIDATOR_REPORT],
+        known_identifiers={a.identifier for a in ds},
+    )
+    report = json.loads(paths["report"].read_text(encoding="utf-8"))
+
+    assert set(report["report"]) >= {
+        "valid",
+        "fileType",
+        "iatiVersion",
+        "rulesetCommitSha",
+        "codelistCommitSha",
+        "apiVersion",
+        "summary",
+        "errors",
+    }
+    assert report["report"]["iatiVersion"] == "2.03"
+    assert set(report["report"]["summary"]) == {"critical", "error", "warning", "advisory"}
+    assert sum(report["report"]["summary"].values()) == len(findings)
+
+    # The contract's activity -> category -> error nesting, losing nothing.
+    flattened = [
+        error
+        for activity in report["report"]["errors"]
+        for group in activity["errors"]
+        for error in group["errors"]
+    ]
+    assert len(flattened) == len(findings)
+    for activity in report["report"]["errors"]:
+        assert set(activity) == {"identifier", "title", "errors"}
+        for group in activity["errors"]:
+            assert set(group) == {"category", "errors"}
+            assert group["category"] in {c.value for c in Category}
+            for error in group["errors"]:
+                assert {"id", "severity", "message", "context"} <= set(error)
+
+    # Validator findings keep their own severity and stay untouched; scout
+    # findings are advisory and identify themselves through `details.source`,
+    # which is needed because the validator uses `advisory` for its 1000.x rules.
+    official = next(e for e in flattened if e["id"] == "7.5.3")
+    assert official["severity"] == "error"
+    assert "details" not in official
+    scout = next(e for e in flattened if e["id"].startswith(("E-", "W-")))
+    assert scout["severity"] == "advisory"
+    assert scout["details"]["source"] == "scout"
+
+    # Scout's own metadata is namespaced, never mixed into the official block.
+    assert report["scout"]["org_id"] == "XX-TEST-1"
+    assert report["scout"]["per_source"]["validator"] == 1
+    assert report["scout"]["documents"][0]["registry_name"] == "xx-test"
+
+
+def test_report_flags_activities_missing_from_the_datastore(tmp_path):
+    """The validator reads published XML, so it can see activities the Datastore has not."""
+    ds = load_dataset(_org_dir(tmp_path), "XX-TEST-1", today=date(2026, 9, 11))
+    unknown = dict(VALIDATOR_REPORT)
+    unknown["report"] = dict(VALIDATOR_REPORT["report"])
+    unknown["report"]["errors"] = [
+        {**VALIDATOR_REPORT["report"]["errors"][0], "identifier": "XX-TEST-1-NOT-INGESTED"}
+    ]
+    findings = findings_from_reports([unknown])
+
+    report = build_report(
+        findings, [], "XX-TEST-1", len(ds), [unknown], {a.identifier for a in ds}
+    )
+    assert report["scout"]["activities_not_in_datastore"] == ["XX-TEST-1-NOT-INGESTED"]
+
+
+def test_findings_from_report_flattens_the_nesting():
+    findings = findings_from_reports([VALIDATOR_REPORT])
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.code == "7.5.3"
+    assert f.severity == Severity.ERROR
+    assert f.category == Category.FINANCIAL
+    assert f.source == Source.VALIDATOR
+    assert f.iati_identifier == "XX-TEST-1-A"
+    assert f.context == [{"text": "period-end at line: 49"}]
+    assert f.urls["d_portal"].startswith("https://d-portal.iatistandard.org/")
+
+
+def test_unknown_validator_category_or_severity_does_not_drop_the_finding():
+    """IATI can extend its vocabularies without warning; an unknown value must not lose data."""
+    odd = {
+        "report": {
+            "errors": [
+                {
+                    "identifier": "XX-TEST-1-A",
+                    "title": "t",
+                    "errors": [
+                        {
+                            "category": "something-new",
+                            "errors": [{"id": "9.9.9", "severity": "brand-new", "message": "m"}],
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    findings = findings_from_reports([odd])
+    assert len(findings) == 1
+    assert findings[0].category == Category.IATI
+    assert findings[0].severity == Severity.ERROR
 
 
 def test_select_rules_filters():
     config = RuleConfig(enabled={"W-C09": False})
     codes = {r.code for r in select_rules(config)}
     assert "W-C09" not in codes
-    assert "E-A01" in codes
+    assert "E-A05" in codes
 
-    only = select_rules(config, codes=["W-C09", "E-A01"])
-    assert {r.code for r in only} == {"W-C09", "E-A01"}  # explicit list overrides disabled
+    only = select_rules(config, codes=["W-C09", "E-A05"])
+    assert {r.code for r in only} == {"W-C09", "E-A05"}  # explicit list overrides disabled
 
-    errors = select_rules(config, severity=Severity.ERROR)
-    assert all(r.severity == Severity.ERROR for r in errors)
+    financial = select_rules(config, category=Category.FINANCIAL)
+    assert financial and all(r.category == Category.FINANCIAL for r in financial)
 
     try:
         select_rules(config, codes=["X-Z99"])
@@ -172,16 +297,16 @@ def test_select_rules_filters():
 def test_load_rule_config(tmp_path):
     path = tmp_path / "rules.toml"
     path.write_text(
-        '[thresholds]\nstale_months = 6\n[rules."E-A01"]\nenabled = false\n'
+        '[thresholds]\nstale_months = 6\n[rules."E-A05"]\nenabled = false\n'
         '[rules."W-C09"]\nsystemic = true\n',
         encoding="utf-8",
     )
     config = load_rule_config(path)
     assert config.thresholds["stale_months"] == 6
     assert config.thresholds["budget_max_days"] == 366  # default preserved
-    assert not config.is_enabled("E-A01")
+    assert not config.is_enabled("E-A05")
     assert config.is_systemic("W-C09")
-    assert config.is_enabled("E-A02")
+    assert config.is_enabled("E-A06")
 
 
 def test_d_portal_url_encodes_unsafe_characters():

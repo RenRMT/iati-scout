@@ -19,3 +19,13 @@ data_dir = "data/raw"
 
 # IATI Datastore API base URL.
 base_url = "https://api.iatistandard.org/datastore"
+
+# Directory (relative to the project root) for cached official IATI Validator reports.
+validation_dir = "data/validation"
+
+# IATI Validator v2 API base URL. `GET /report` returns the stored validation
+# report for a document already known to the IATI Registry.
+validator_base_url = "https://api.iatistandard.org/validator"
+
+# IATI Registry (CKAN) API base URL, used to resolve org_id -> published documents.
+registry_base_url = "https://iatiregistry.org/api/3/action"

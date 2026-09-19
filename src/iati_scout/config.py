@@ -27,6 +27,9 @@ class Settings:
     min_request_interval: float
     data_dir: Path
     base_url: str
+    validation_dir: Path
+    validator_base_url: str
+    registry_base_url: str
 
 
 def load_settings(
@@ -76,6 +79,10 @@ def load_settings(
     if not resolved_data_dir.is_absolute():
         resolved_data_dir = PROJECT_ROOT / resolved_data_dir
 
+    validation_dir = Path(file_config.get("validation_dir") or "data/validation")
+    if not validation_dir.is_absolute():
+        validation_dir = PROJECT_ROOT / validation_dir
+
     return Settings(
         org_id=resolved_org_id,
         api_key=api_key,
@@ -84,4 +91,11 @@ def load_settings(
         min_request_interval=float(file_config.get("min_request_interval", 1.0)),
         data_dir=resolved_data_dir,
         base_url=str(file_config.get("base_url", "https://api.iatistandard.org/datastore")),
+        validation_dir=validation_dir,
+        validator_base_url=str(
+            file_config.get("validator_base_url", "https://api.iatistandard.org/validator")
+        ),
+        registry_base_url=str(
+            file_config.get("registry_base_url", "https://iatiregistry.org/api/3/action")
+        ),
     )

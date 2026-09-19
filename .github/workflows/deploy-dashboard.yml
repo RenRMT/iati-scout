@@ -34,7 +34,10 @@ jobs:
       - name: Fetch IATI Datastore data
         run: python -m iati_scout fetch
 
-      - name: Run quality checks and write dashboard export
+      - name: Fetch the official IATI validation report
+        run: python -m iati_scout validate
+
+      - name: Merge findings and write dashboard export
         run: python -m iati_scout check
 
       - uses: actions/setup-node@v4
