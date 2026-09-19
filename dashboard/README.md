@@ -11,9 +11,9 @@ files under `data/quality/<org_id>/export/`, written by `iati-scout check`
 ```
 data/quality/<org_id>/export/
 ├── meta.json         # run metadata: org, timestamps, tool version, activity count
-├── rules.json        # rule catalogue as run: code/title/severity/section/systemic + thresholds
-├── summary.json       # pre-aggregated counts (totals, per rule, per section, per severity)
-├── activities.json    # one row per activity: identity, key dates, its own error/warning counts
+├── rules.json        # rule catalogue: scout rules + every validator rule id seen, with source
+├── summary.json       # pre-aggregated counts (totals, per rule/section/severity/category/source)
+├── activities.json    # one row per activity: identity, key dates, per-severity + per-source counts
 └── findings.parquet   # one row per finding, for DuckDB-WASM
 ```
 
@@ -42,10 +42,10 @@ files are served (GitHub Pages, DigitalOcean, ...).
 
 ## Pages
 
-- **Overview** — org header, error/warning/systemic KPIs, findings-per-section chart, rule catalogue
+- **Overview** — org header, validity + per-severity KPIs, documents validated, findings-per-category chart, rule catalogue
 - **Rules** — pick a rule (or arrive via `rules?code=E-A01`), see its counts, most-affected
   activities, and up to 500 sample findings
-- **Findings** — filter by severity/section/rule/systemic and free text, browse up to 1 000 matches
+- **Findings** — filter by source/severity/category/rule/systemic and free text, browse up to 1 000 matches
 - **Activities** — search activities by id/title, see one activity's dates, links, and findings
 
 Systemic findings (publisher-wide patterns rather than per-activity issues — see the rules.toml

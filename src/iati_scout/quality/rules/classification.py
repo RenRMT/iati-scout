@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterator
 
-from iati_scout.quality.findings import Issue, Severity, fmt_pct
+from iati_scout.quality.findings import Category, Issue, fmt_pct
 from iati_scout.quality.model import Activity
 from iati_scout.quality.registry import Context, rule
 
@@ -35,56 +35,7 @@ def _sector_sums(a: Activity) -> dict[str, tuple[float, list[float | None], int]
     }
 
 
-@rule("E-C01", Severity.ERROR, "DAC sector percentages do not sum to 100")
-def dac_sector_percentages(a: Activity, ctx: Context) -> Iterator[Issue]:
-    tol = ctx.t("percentage_tolerance")
-    sums = _sector_sums(a)
-    if DAC_SECTOR_VOCABULARY not in sums:
-        return
-    total, pcts, count = sums[DAC_SECTOR_VOCABULARY]
-    if count > 1 and abs(total - 100) > tol:
-        yield Issue(
-            f"DAC sector percentages sum to {total:g}% across {count} sectors, expected 100%",
-            {"vocabulary": DAC_SECTOR_VOCABULARY, "percentages": pcts, "sum": total},
-        )
-
-
-@rule("W-C02", Severity.WARNING, "Non-DAC sector percentages do not sum to 100")
-def other_sector_percentages(a: Activity, ctx: Context) -> Iterator[Issue]:
-    tol = ctx.t("percentage_tolerance")
-    for vocab, (total, pcts, count) in _sector_sums(a).items():
-        if vocab == DAC_SECTOR_VOCABULARY:
-            continue
-        if count > 1 and abs(total - 100) > tol:
-            yield Issue(
-                f"Sector vocabulary {vocab} percentages sum to {total:g}% across {count} codes, "
-                f"expected 100%",
-                {"vocabulary": vocab, "percentages": pcts, "sum": total},
-            )
-
-
-@rule("E-C03", Severity.ERROR, "Recipient-country percentages do not sum to 100")
-def country_percentages(a: Activity, ctx: Context) -> Iterator[Issue]:
-    if len(a.recipient_countries) < 2:
-        return
-    pcts = [c.percentage for c in a.recipient_countries]
-    if any(p is None for p in pcts):
-        yield Issue(
-            f"{len(a.recipient_countries)} recipient countries but percentages are missing for "
-            f"some of them",
-            {"countries": [c.code for c in a.recipient_countries], "percentages": pcts},
-        )
-        return
-    total = sum(pcts)
-    if abs(total - 100) > ctx.t("percentage_tolerance"):
-        yield Issue(
-            f"Recipient-country percentages sum to {total:g}% across "
-            f"{len(a.recipient_countries)} countries, expected 100%",
-            {"countries": [c.code for c in a.recipient_countries], "percentages": pcts, "sum": total},
-        )
-
-
-@rule("E-C04", Severity.ERROR, "Recipient country and region both given without percentages")
+@rule("E-C04", Category.CLASSIFICATIONS, "Recipient country and region both given without percentages")
 def country_and_region(a: Activity, ctx: Context) -> Iterator[Issue]:
     if a.recipient_countries and a.recipient_regions:
         country_pcts = [c.percentage for c in a.recipient_countries]
@@ -103,7 +54,7 @@ def country_and_region(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("E-C05", Severity.ERROR, "Sector or country with 0 percent")
+@rule("E-C05", Category.CLASSIFICATIONS, "Sector or country with 0 percent")
 def zero_percentage(a: Activity, ctx: Context) -> Iterator[Issue]:
     for s in a.sectors:
         if s.percentage == 0:
@@ -119,7 +70,7 @@ def zero_percentage(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-C06", Severity.WARNING, "Gender-equality sector without gender marker")
+@rule("W-C06", Category.CLASSIFICATIONS, "Gender-equality sector without gender marker")
 def gender_sector_without_marker(a: Activity, ctx: Context) -> Iterator[Issue]:
     has_sector = any(s.code == SECTOR_GENDER_EQUALITY for s in a.sectors)
     marker = a.policy_markers.get(MARKER_GENDER)
@@ -131,7 +82,7 @@ def gender_sector_without_marker(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-C07", Severity.WARNING, "Gender marker 'principal' without gender-equality sector")
+@rule("W-C07", Category.CLASSIFICATIONS, "Gender marker 'principal' without gender-equality sector")
 def gender_principal_without_sector(a: Activity, ctx: Context) -> Iterator[Issue]:
     if a.policy_markers.get(MARKER_GENDER) == MARKER_PRINCIPAL and not any(
         s.code == SECTOR_GENDER_EQUALITY for s in a.sectors
@@ -147,7 +98,7 @@ def gender_principal_without_sector(a: Activity, ctx: Context) -> Iterator[Issue
         )
 
 
-@rule("W-C08", Severity.WARNING, "Home country as recipient country")
+@rule("W-C08", Category.CLASSIFICATIONS, "Home country as recipient country")
 def home_country_recipient(a: Activity, ctx: Context) -> Iterator[Issue]:
     home = ctx.t("home_country")
     for c in a.recipient_countries:
@@ -159,7 +110,7 @@ def home_country_recipient(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-C09", Severity.WARNING, "Humanitarian flag absent")
+@rule("W-C09", Category.CLASSIFICATIONS, "Humanitarian flag absent")
 def humanitarian_absent(a: Activity, ctx: Context) -> Iterator[Issue]:
     if a.humanitarian is None:
         yield Issue(
@@ -168,7 +119,7 @@ def humanitarian_absent(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-C10", Severity.WARNING, "Missing default classification")
+@rule("W-C10", Category.CLASSIFICATIONS, "Missing default classification")
 def missing_defaults(a: Activity, ctx: Context) -> Iterator[Issue]:
     missing = [label for attr, label in DEFAULT_FIELDS.items() if not getattr(a, attr)]
     if missing:
@@ -178,14 +129,6 @@ def missing_defaults(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule(
-    "E-C11",
-    Severity.ERROR,
-    "DAC sector percentage completeness",
-    "IATI ruleset 2.1.1/2.1.4: when multiple sectors in a vocabulary are declared, "
-    "each must have a percentage; when a single sector is declared, the percentage "
-    "must be omitted or set to 100.",
-)
 def dac_sector_percentage_completeness(a: Activity, ctx: Context) -> Iterator[Issue]:
     tol = ctx.t("percentage_tolerance")
     sums = _sector_sums(a)
@@ -207,13 +150,6 @@ def dac_sector_percentage_completeness(a: Activity, ctx: Context) -> Iterator[Is
         )
 
 
-@rule(
-    "E-C12",
-    Severity.ERROR,
-    "Single recipient-country percentage neither omitted nor 100",
-    "IATI ruleset 3.1.4: when a single recipient country is declared, the "
-    "percentage must be omitted or set to 100.",
-)
 def single_country_percentage(a: Activity, ctx: Context) -> Iterator[Issue]:
     tol = ctx.t("percentage_tolerance")
     if len(a.recipient_countries) == 1:
@@ -226,14 +162,6 @@ def single_country_percentage(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule(
-    "E-C13",
-    Severity.ERROR,
-    "Recipient-region percentage completeness",
-    "IATI ruleset 3.4.1/3.4.4: when multiple recipient regions are declared, each "
-    "must have a percentage; when a single region is declared, the percentage must "
-    "be omitted or set to 100.",
-)
 def region_percentage_completeness(a: Activity, ctx: Context) -> Iterator[Issue]:
     tol = ctx.t("percentage_tolerance")
     regions = a.recipient_regions
@@ -253,12 +181,6 @@ def region_percentage_completeness(a: Activity, ctx: Context) -> Iterator[Issue]
         )
 
 
-@rule(
-    "E-C14",
-    Severity.ERROR,
-    "Recipient-region percentages do not sum to 100",
-    "IATI ruleset 3.4.2: percentage values for recipient regions must add up to 100%.",
-)
 def region_percentages_sum(a: Activity, ctx: Context) -> Iterator[Issue]:
     tol = ctx.t("percentage_tolerance")
     regions = a.recipient_regions
@@ -273,14 +195,6 @@ def region_percentages_sum(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule(
-    "E-C15",
-    Severity.ERROR,
-    "Default language missing",
-    "IATI ruleset 4.1.1: the activity should specify a default language OR the "
-    "language must be specified for each narrative element. This check covers the "
-    "title and description narratives only.",
-)
 def default_language_missing(a: Activity, ctx: Context) -> Iterator[Issue]:
     if a.default_language:
         return

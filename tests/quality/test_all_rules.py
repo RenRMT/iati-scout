@@ -3,20 +3,44 @@ activity triggers nothing, and every emitted Finding is self-contained."""
 
 import re
 
-from iati_scout.quality.findings import Finding, Severity
-from iati_scout.quality.registry import Context, all_rules
+from iati_scout.quality.findings import Category, Finding, Severity, Source
+from iati_scout.quality.registry import SECTION_CATEGORIES, Context, all_rules
 from iati_scout.quality.runner import run_rule
 from tests.quality.conftest import make_activity, make_dataset
 
 CODE_RE = re.compile(r"^[EW]-[A-H]\d{2}$")
 
 
-def test_rule_codes_and_severity_prefix_agree():
+def test_every_rule_is_advisory_with_a_valid_category():
+    """Scout rules never claim an IATI severity: they are heuristics, not standard violations."""
     for spec in all_rules():
         assert CODE_RE.match(spec.code), spec.code
-        expected = Severity.ERROR if spec.code.startswith("E-") else Severity.WARNING
-        assert spec.severity == expected, spec.code
+        assert spec.severity == Severity.ADVISORY, spec.code
+        assert isinstance(spec.category, Category), spec.code
+        # Section F splits between geo and information; every other section is fixed.
+        if spec.section != "F":
+            assert spec.category == SECTION_CATEGORIES[spec.section], spec.code
+        else:
+            assert spec.category in (Category.GEO, Category.INFORMATION), spec.code
+        assert spec.weight == ("error" if spec.code.startswith("E-") else "warning")
         assert spec.title
+
+
+def test_no_rule_duplicates_the_official_ruleset():
+    """The official IATI ruleset is fetched, not re-implemented.
+
+    These codes were removed when `iati-scout` switched to the IATI Validator
+    report as its source for standard-ruleset checks; reintroducing one would
+    mean the same violation is reported twice, from two sources that can drift.
+    """
+    removed = {
+        "E-A01", "E-A02", "E-A03", "E-A10", "E-A11",
+        "E-B01", "E-B04", "E-B22", "E-B23", "E-B24",
+        "E-C01", "W-C02", "E-C03", "E-C11", "E-C12", "E-C13", "E-C14", "E-C15",
+        "E-G01", "E-G02", "E-G05", "W-G06",
+        "E-H01", "W-H02", "W-H03", "W-H04",
+    }
+    assert {spec.code for spec in all_rules()} & removed == set()
 
 
 def test_clean_activity_triggers_no_rule():
@@ -54,12 +78,22 @@ def test_findings_are_self_contained():
             "https://d-portal.iatistandard.org/ctrack.html#view=act&aid=XX-TEST-1-A"
         )
         assert f.activity_title == activity.title
+        assert f.source == Source.SCOUT
+        assert f.context and f.context[0]["text"] == f.message
         # Serialisable (dates converted, enums to values)
         payload = f.to_dict()
-        assert payload["severity"] in ("error", "warning")
+        assert payload["severity"] == "advisory"
+        assert payload["source"] == "scout"
+        assert payload["category"] in {c.value for c in Category}
         import json
 
         json.dumps(payload)
+        # And representable as an official validator error object.
+        error = f.to_validator_error()
+        assert error["id"] == f.code
+        assert error["severity"] == "advisory"
+        assert error["details"]["source"] == "scout"
+        json.dumps(error)
 
 
 def test_row_level_findings_carry_item_locator():

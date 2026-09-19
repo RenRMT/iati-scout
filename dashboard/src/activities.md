@@ -6,7 +6,7 @@ sql:
 ---
 
 ```js
-import {fmtDate, dPortalUrl} from "./components/format.js";
+import {fmtDate, dPortalUrl, sourceName} from "./components/format.js";
 ```
 
 # Activity explorer
@@ -22,8 +22,8 @@ const search = view(Inputs.search(activities, {placeholder: "Search by activity 
 ```js
 const selection = view(
   Inputs.table(search, {
-    columns: ["identifier", "title", "status", "errors", "warnings"],
-    header: {identifier: "Activity", title: "Title", status: "Status", errors: "Errors", warnings: "Warnings"},
+    columns: ["identifier", "title", "status", "error", "warning", "advisory"],
+    header: {identifier: "Activity", title: "Title", status: "Status", error: "Errors", warning: "Warnings", advisory: "Advisories"},
     multiple: false,
     rows: 12,
     width: {title: 340},
@@ -54,10 +54,12 @@ selection
 ```js
 const activityFindings = selection
   ? [...(await sql`
-      SELECT code, severity, systemic, message
+      SELECT code, source, severity, category, systemic, message
       FROM findings
       WHERE iati_identifier = ${selection.identifier}
-      ORDER BY severity, code
+      ORDER BY
+        CASE severity WHEN 'critical' THEN 0 WHEN 'error' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+        code
     `)]
   : [];
 ```
@@ -65,10 +67,11 @@ const activityFindings = selection
 ```js
 selection
   ? Inputs.table(activityFindings, {
-      columns: ["code", "severity", "message", "systemic"],
-      header: {code: "Code", severity: "Severity", message: "Finding", systemic: "Systemic"},
+      columns: ["code", "source", "severity", "message", "systemic"],
+      header: {code: "Rule", source: "Source", severity: "Severity", message: "Finding", systemic: "Systemic"},
       format: {
         code: (d) => html`<a href="rules?code=${d}">${d}</a>`,
+        source: (d) => sourceName(d),
         systemic: (d) => (d ? "yes" : ""),
       },
       width: {message: 480},

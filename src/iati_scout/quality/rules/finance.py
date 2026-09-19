@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Iterator
 from itertools import pairwise
 
-from iati_scout.quality.findings import Issue, Severity, fmt_date, fmt_money
+from iati_scout.quality.findings import Category, Issue, fmt_date, fmt_money
 from iati_scout.quality.model import (
     ORG_TYPE_OTHER,
     OUTGOING_TXN_TYPES,
@@ -33,19 +33,7 @@ def _txn_name(code: str) -> str:
 # --- budgets ---------------------------------------------------------------
 
 
-@rule("E-B01", Severity.ERROR, "Budget period end before start")
-def budget_end_before_start(a: Activity, ctx: Context) -> Iterator[Issue]:
-    for b in a.budgets:
-        if b.period_start and b.period_end and b.period_end < b.period_start:
-            yield Issue(
-                f"Budget period ends {fmt_date(b.period_end)} before it starts "
-                f"{fmt_date(b.period_start)} (value {fmt_money(b.value, b.currency)})",
-                {"period_start": b.period_start, "period_end": b.period_end, "value": b.value},
-                item=b.locator(),
-            )
-
-
-@rule("E-B02", Severity.ERROR, "Budget value-date outside budget period")
+@rule("E-B02", Category.FINANCIAL, "Budget value-date outside budget period")
 def budget_value_date_outside_period(a: Activity, ctx: Context) -> Iterator[Issue]:
     for b in a.budgets:
         if not (b.period_start and b.period_end and b.value_date):
@@ -64,7 +52,7 @@ def budget_value_date_outside_period(a: Activity, ctx: Context) -> Iterator[Issu
             )
 
 
-@rule("E-B03", Severity.ERROR, "Negative budget value")
+@rule("E-B03", Category.FINANCIAL, "Negative budget value")
 def negative_budget(a: Activity, ctx: Context) -> Iterator[Issue]:
     for b in a.budgets:
         if b.value < 0:
@@ -77,22 +65,7 @@ def negative_budget(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("E-B04", Severity.ERROR, "Budget period longer than one year")
-def budget_period_too_long(a: Activity, ctx: Context) -> Iterator[Issue]:
-    max_days = ctx.t("budget_max_days")
-    for b in a.budgets:
-        if b.period_start and b.period_end:
-            days = (b.period_end - b.period_start).days
-            if days > max_days:
-                yield Issue(
-                    f"Budget period {fmt_date(b.period_start)} – {fmt_date(b.period_end)} spans "
-                    f"{days} days; the standard requires budget periods of at most one year",
-                    {"period_start": b.period_start, "period_end": b.period_end, "days": days},
-                    item=b.locator(),
-                )
-
-
-@rule("W-B05", Severity.WARNING, "Overlapping budget periods")
+@rule("W-B05", Category.FINANCIAL, "Overlapping budget periods")
 def budget_periods_overlap(a: Activity, ctx: Context) -> Iterator[Issue]:
     periods = sorted(
         (b for b in a.budgets if b.period_start and b.period_end and b.period_start <= b.period_end),
@@ -112,7 +85,7 @@ def budget_periods_overlap(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-B06", Severity.WARNING, "Budget period shorter than one month")
+@rule("W-B06", Category.FINANCIAL, "Budget period shorter than one month")
 def budget_period_too_short(a: Activity, ctx: Context) -> Iterator[Issue]:
     min_days = ctx.t("budget_min_days")
     for b in a.budgets:
@@ -127,7 +100,7 @@ def budget_period_too_short(a: Activity, ctx: Context) -> Iterator[Issue]:
                 )
 
 
-@rule("W-B07", Severity.WARNING, "Zero-value budget or transaction")
+@rule("W-B07", Category.FINANCIAL, "Zero-value budget or transaction")
 def zero_values(a: Activity, ctx: Context) -> Iterator[Issue]:
     for b in a.budgets:
         if b.value == 0:
@@ -148,7 +121,7 @@ def zero_values(a: Activity, ctx: Context) -> Iterator[Issue]:
 # --- transactions ----------------------------------------------------------
 
 
-@rule("W-B08", Severity.WARNING, "Negative disbursement or expenditure")
+@rule("W-B08", Category.FINANCIAL, "Negative disbursement or expenditure")
 def negative_disbursement(a: Activity, ctx: Context) -> Iterator[Issue]:
     for t in a.transactions:
         if t.type in (TXN_DISBURSEMENT, TXN_EXPENDITURE) and t.value < 0:
@@ -162,7 +135,7 @@ def negative_disbursement(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("E-B09", Severity.ERROR, "Disbursed more than committed")
+@rule("E-B09", Category.FINANCIAL, "Disbursed more than committed")
 def disbursed_exceeds_committed(a: Activity, ctx: Context) -> Iterator[Issue]:
     committed = a.sum_transactions(TXN_COMMITMENT)
     spent = a.sum_transactions(TXN_DISBURSEMENT, TXN_EXPENDITURE)
@@ -174,7 +147,7 @@ def disbursed_exceeds_committed(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-B10", Severity.WARNING, "Disbursements without any commitment")
+@rule("W-B10", Category.FINANCIAL, "Disbursements without any commitment")
 def disbursed_without_commitment(a: Activity, ctx: Context) -> Iterator[Issue]:
     committed = a.sum_transactions(TXN_COMMITMENT)
     spent = a.sum_transactions(TXN_DISBURSEMENT, TXN_EXPENDITURE)
@@ -186,7 +159,7 @@ def disbursed_without_commitment(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-B11", Severity.WARNING, "Closed activity with zero disbursements")
+@rule("W-B11", Category.FINANCIAL, "Closed activity with zero disbursements")
 def closed_without_disbursement(a: Activity, ctx: Context) -> Iterator[Issue]:
     if a.is_closed and a.sum_transactions(TXN_DISBURSEMENT, TXN_EXPENDITURE) == 0:
         committed = a.sum_transactions(TXN_COMMITMENT)
@@ -197,7 +170,7 @@ def closed_without_disbursement(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-B12", Severity.WARNING, "Closed activity with commitment not fully disbursed")
+@rule("W-B12", Category.FINANCIAL, "Closed activity with commitment not fully disbursed")
 def closed_not_fully_disbursed(a: Activity, ctx: Context) -> Iterator[Issue]:
     if not a.is_closed:
         return
@@ -217,7 +190,7 @@ def closed_not_fully_disbursed(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-B13", Severity.WARNING, "Transaction outside activity dates")
+@rule("W-B13", Category.FINANCIAL, "Transaction outside activity dates")
 def transaction_outside_activity_dates(a: Activity, ctx: Context) -> Iterator[Issue]:
     for t in a.transactions:
         if not t.date:
@@ -238,7 +211,7 @@ def transaction_outside_activity_dates(a: Activity, ctx: Context) -> Iterator[Is
             )
 
 
-@rule("W-B14", Severity.WARNING, "Outgoing transaction to the reporting organisation itself")
+@rule("W-B14", Category.FINANCIAL, "Outgoing transaction to the reporting organisation itself")
 def receiver_is_reporting_org(a: Activity, ctx: Context) -> Iterator[Issue]:
     own_names = {n.strip().lower() for n in a.reporting_org_names if n}
     own_ref = (a.reporting_org_ref or "").strip().lower()
@@ -256,7 +229,7 @@ def receiver_is_reporting_org(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-B15", Severity.WARNING, "Duplicate transaction")
+@rule("W-B15", Category.FINANCIAL, "Duplicate transaction")
 def duplicate_transaction(a: Activity, ctx: Context) -> Iterator[Issue]:
     seen: Counter[tuple] = Counter()
     for t in a.transactions:
@@ -272,7 +245,7 @@ def duplicate_transaction(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-B16", Severity.WARNING, "Outgoing transaction without receiver organisation")
+@rule("W-B16", Category.FINANCIAL, "Outgoing transaction without receiver organisation")
 def outgoing_without_receiver(a: Activity, ctx: Context) -> Iterator[Issue]:
     for t in a.transactions:
         if t.type in OUTGOING_TXN_TYPES and not t.receiver_name and not t.receiver_ref:
@@ -284,7 +257,7 @@ def outgoing_without_receiver(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-B17", Severity.WARNING, "Receiver organisation type 'Other'")
+@rule("W-B17", Category.FINANCIAL, "Receiver organisation type 'Other'")
 def receiver_type_other(a: Activity, ctx: Context) -> Iterator[Issue]:
     for t in a.transactions:
         if t.receiver_type == ORG_TYPE_OTHER:
@@ -296,7 +269,7 @@ def receiver_type_other(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-B18", Severity.WARNING, "Value-date far from transaction-date")
+@rule("W-B18", Category.FINANCIAL, "Value-date far from transaction-date")
 def value_date_far_from_transaction_date(a: Activity, ctx: Context) -> Iterator[Issue]:
     max_days = ctx.t("value_date_max_days")
     for t in a.transactions:
@@ -311,7 +284,7 @@ def value_date_far_from_transaction_date(a: Activity, ctx: Context) -> Iterator[
                 )
 
 
-@rule("W-B19", Severity.WARNING, "Outlier transaction value")
+@rule("W-B19", Category.FINANCIAL, "Outlier transaction value")
 def outlier_transaction_value(a: Activity, ctx: Context) -> Iterator[Issue]:
     p99 = ctx.dataset.transaction_value_p99
     min_value = ctx.t("min_transaction_value")
@@ -335,7 +308,7 @@ def outlier_transaction_value(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-B20", Severity.WARNING, "Total budget far from total commitment")
+@rule("W-B20", Category.FINANCIAL, "Total budget far from total commitment")
 def budget_vs_commitment(a: Activity, ctx: Context) -> Iterator[Issue]:
     committed = a.sum_transactions(TXN_COMMITMENT)
     budgeted = sum(b.value for b in a.budgets)
@@ -349,7 +322,7 @@ def budget_vs_commitment(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-B21", Severity.WARNING, "Transaction dated on 1 January or 31 December")
+@rule("W-B21", Category.FINANCIAL, "Transaction dated on 1 January or 31 December")
 def transaction_on_year_boundary(a: Activity, ctx: Context) -> Iterator[Issue]:
     for t in a.transactions:
         if t.date and (t.date.month, t.date.day) in ((1, 1), (12, 31)):
@@ -361,12 +334,6 @@ def transaction_on_year_boundary(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule(
-    "E-B22",
-    Severity.ERROR,
-    "Transaction date in the future",
-    "IATI ruleset 11.2.1: the transaction date must not be in the future.",
-)
 def transaction_date_in_future(a: Activity, ctx: Context) -> Iterator[Issue]:
     for t in a.transactions:
         if t.date and t.date > ctx.today:
@@ -378,12 +345,6 @@ def transaction_date_in_future(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule(
-    "E-B23",
-    Severity.ERROR,
-    "Transaction value-date in the future",
-    "IATI ruleset 11.2.2: the transaction value-date must not be in the future.",
-)
 def transaction_value_date_in_future(a: Activity, ctx: Context) -> Iterator[Issue]:
     for t in a.transactions:
         if t.value_date and t.value_date > ctx.today:
@@ -395,13 +356,6 @@ def transaction_value_date_in_future(a: Activity, ctx: Context) -> Iterator[Issu
             )
 
 
-@rule(
-    "E-B24",
-    Severity.ERROR,
-    "Currency missing for a monetary value",
-    "IATI ruleset 7.8.1: the activity should specify a default currency OR the "
-    "currency must be specified for each monetary value.",
-)
 def currency_missing(a: Activity, ctx: Context) -> Iterator[Issue]:
     for t in a.transactions:
         if not t.currency:

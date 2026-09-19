@@ -5,7 +5,7 @@ sql:
 ---
 
 ```js
-import {sectionName, severityColor, fmtNumber, fmtPercent, fmtDate, rulesByCode} from "./components/format.js";
+import {categoryName, sourceName, severityColor, SEVERITY_ORDER, fmtNumber, fmtPercent, fmtDate} from "./components/format.js";
 ```
 
 ```js
@@ -18,18 +18,48 @@ const rulesDoc = FileAttachment("loaders/rules.json").json();
 
 <span class="muted">${meta.org_id} · checked ${fmtDate(meta.checked_at)} · data fetched ${fmtDate(meta.fetched_at)} · ${fmtNumber(meta.activity_count)} activities</span>
 
+Findings come from two sources. Violations of the **IATI standard** are taken
+from the official [IATI Validator](https://validator.iatistandard.org/) and keep
+its severity (`critical`/`error`/`warning`). Everything iati-scout adds on top
+is reported as `advisory`, because a heuristic is not a standard violation —
+filter on **source**, not severity, to separate them.
+
 ```js
-const showSystemic = view(Inputs.toggle({label: "Include systemic findings", value: false}));
+const v = meta.validator ?? {};
 ```
 
 <div class="grid grid-cols-4">
-  <div class="card"><h2>${fmtNumber(summary.totals.errors)}</h2><span>Errors</span></div>
-  <div class="card"><h2>${fmtNumber(summary.totals.warnings)}</h2><span>Warnings</span></div>
-  <div class="card"><h2>${fmtPercent(summary.totals.activities_affected / summary.totals.activities)}</h2><span>Activities with a finding</span></div>
-  <div class="card"><h2>${fmtPercent(summary.totals.systemic_findings / summary.totals.findings)}</h2><span>Systemic findings</span></div>
+  <div class="card"><h2>${v.valid == null ? "–" : (v.valid ? "Valid" : "Invalid")}</h2><span>Against IATI ${v.iati_version ?? ""}</span></div>
+  <div class="card"><h2>${fmtNumber((summary.totals.critical ?? 0) + (summary.totals.error ?? 0))}</h2><span>Standard errors</span></div>
+  <div class="card"><h2>${fmtNumber(summary.totals.warning ?? 0)}</h2><span>Standard warnings</span></div>
+  <div class="card"><h2>${fmtNumber(summary.totals.advisory ?? 0)}</h2><span>Advisories</span></div>
 </div>
 
-## Findings by rule section
+<div class="grid grid-cols-3">
+  <div class="card"><h2>${fmtPercent(summary.totals.activities_affected / summary.totals.activities)}</h2><span>Activities with a finding</span></div>
+  <div class="card"><h2>${fmtPercent(summary.totals.systemic_findings / summary.totals.findings)}</h2><span>Systemic findings</span></div>
+  <div class="card"><h2>${fmtNumber(v.documents?.length ?? 0)}</h2><span>Documents validated</span></div>
+</div>
+
+## Documents
+
+```js
+Inputs.table(v.documents ?? [], {
+  columns: ["registry_name", "valid", "document_url"],
+  header: {registry_name: "Registry dataset", valid: "Valid", document_url: "Published file"},
+  format: {
+    valid: (d) => (d ? "yes" : "NO"),
+    document_url: (d) => html`<a href=${d} target="_blank">${d}</a>`,
+  },
+  width: {document_url: 420},
+})
+```
+
+## Findings by category
+
+```js
+const showSystemic = view(Inputs.toggle({label: "Include systemic findings", value: false}));
+```
 
 ```js
 const ruleRows = rulesDoc.rules.map((r) => ({
@@ -41,23 +71,30 @@ const visibleRuleRows = ruleRows.filter((r) => showSystemic || !r.systemic);
 ```
 
 ```js
-const bySection = d3.rollups(
+const byCategory = d3.rollups(
   visibleRuleRows,
   (v) => d3.sum(v, (d) => d.findings),
-  (d) => d.section,
+  (d) => d.category,
   (d) => d.severity
-).flatMap(([section, sevs]) => sevs.map(([severity, findings]) => ({section, severity, findings})));
+).flatMap(([category, sevs]) => sevs.map(([severity, findings]) => ({category, severity, findings})));
+const categoryDomain = d3.rollups(byCategory, (v) => d3.sum(v, (d) => d.findings), (d) => d.category)
+  .sort((a, b) => d3.descending(a[1], b[1]))
+  .map(([c]) => c);
 ```
 
 ```js
 Plot.plot({
-  marginLeft: 40,
+  marginLeft: 170,
   width: 800,
   x: {label: "Findings", grid: true},
-  y: {label: null, domain: ["A", "B", "C", "D", "E", "F", "G"]},
-  color: {domain: ["error", "warning"], range: [severityColor("error"), severityColor("warning")], legend: true},
+  y: {label: null, domain: categoryDomain, tickFormat: categoryName},
+  color: {
+    domain: SEVERITY_ORDER,
+    range: SEVERITY_ORDER.map(severityColor),
+    legend: true,
+  },
   marks: [
-    Plot.barX(bySection, {y: "section", x: "findings", fill: "severity", tip: true}),
+    Plot.barX(byCategory, {y: "category", x: "findings", fill: "severity", tip: true}),
     Plot.ruleX([0]),
   ],
 })
@@ -67,19 +104,21 @@ Plot.plot({
 
 ```js
 Inputs.table(visibleRuleRows, {
-  columns: ["code", "severity", "title", "section", "findings", "activities", "systemic"],
+  columns: ["code", "source", "severity", "title", "category", "findings", "activities", "systemic"],
   header: {
-    code: "Code",
+    code: "Rule",
+    source: "Source",
     severity: "Severity",
-    title: "Rule",
-    section: "Section",
+    title: "Description",
+    category: "Category",
     findings: "Findings",
     activities: "Activities",
     systemic: "Systemic",
   },
   format: {
     code: (d) => html`<a href="rules?code=${d}">${d}</a>`,
-    section: (d) => sectionName(d),
+    source: (d) => sourceName(d),
+    category: (d) => categoryName(d),
     systemic: (d) => (d ? "yes" : ""),
   },
   sort: "findings",

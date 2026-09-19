@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterator
 
-from iati_scout.quality.findings import Issue, Severity
+from iati_scout.quality.findings import Category, Issue
 from iati_scout.quality.model import (
     ORG_TYPE_OTHER,
     ROLE_ACCOUNTABLE,
@@ -22,7 +22,7 @@ def _roles(a: Activity) -> set[str]:
     return {o.role for o in a.participating_orgs if o.role}
 
 
-@rule("E-E01", Severity.ERROR, "No funding or accountable organisation")
+@rule("E-E01", Category.PARTICIPATING, "No funding or accountable organisation")
 def missing_funding_or_accountable(a: Activity, ctx: Context) -> Iterator[Issue]:
     roles = _roles(a)
     for role in (ROLE_FUNDING, ROLE_ACCOUNTABLE):
@@ -34,7 +34,7 @@ def missing_funding_or_accountable(a: Activity, ctx: Context) -> Iterator[Issue]
             )
 
 
-@rule("W-E02", Severity.WARNING, "No implementing organisation")
+@rule("W-E02", Category.PARTICIPATING, "No implementing organisation")
 def missing_implementing(a: Activity, ctx: Context) -> Iterator[Issue]:
     roles = _roles(a)
     if ROLE_IMPLEMENTING not in roles:
@@ -45,7 +45,7 @@ def missing_implementing(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-E03", Severity.WARNING, "Organisation listed twice with the same role")
+@rule("W-E03", Category.PARTICIPATING, "Organisation listed twice with the same role")
 def duplicate_participating_org(a: Activity, ctx: Context) -> Iterator[Issue]:
     counts = Counter(
         ((o.name or o.ref or "").strip().lower(), o.role) for o in a.participating_orgs
@@ -58,7 +58,7 @@ def duplicate_participating_org(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-E04", Severity.WARNING, "Participating organisations without identifier")
+@rule("W-E04", Category.PARTICIPATING, "Participating organisations without identifier")
 def participating_org_without_ref(a: Activity, ctx: Context) -> Iterator[Issue]:
     refs = a.raw_list("participating_org_ref")
     names = a.raw_list("participating_org_narrative")
@@ -70,7 +70,7 @@ def participating_org_without_ref(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-E05", Severity.WARNING, "Participating organisation type 'Other'")
+@rule("W-E05", Category.PARTICIPATING, "Participating organisation type 'Other'")
 def participating_org_type_other(a: Activity, ctx: Context) -> Iterator[Issue]:
     for o in a.participating_orgs:
         if o.type == ORG_TYPE_OTHER:

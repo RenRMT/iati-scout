@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from iati_scout.quality.findings import Issue, RelatedActivity, Severity, fmt_date
+from iati_scout.quality.findings import Category, Issue, RelatedActivity, fmt_date
 from iati_scout.quality.model import (
     RELATED_PARENT,
     STATUS_IMPLEMENTATION,
@@ -23,7 +23,7 @@ def _related_parent(p: Activity) -> RelatedActivity:
     return RelatedActivity.build(p.identifier, "parent", p.title)
 
 
-@rule("E-D01", Severity.ERROR, "Related activity not found in the organisation's data")
+@rule("E-D01", Category.RELATIONS, "Related activity not found in the organisation's data")
 def related_not_found(a: Activity, ctx: Context) -> Iterator[Issue]:
     for rel in a.related:
         if rel.ref not in ctx.dataset.identifiers:
@@ -35,7 +35,7 @@ def related_not_found(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("E-D02", Severity.ERROR, "Activity related to itself")
+@rule("E-D02", Category.RELATIONS, "Activity related to itself")
 def related_to_self(a: Activity, ctx: Context) -> Iterator[Issue]:
     for rel in a.related:
         if rel.ref == a.identifier:
@@ -46,7 +46,7 @@ def related_to_self(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("E-D03", Severity.ERROR, "Hierarchy level without matching relations")
+@rule("E-D03", Category.RELATIONS, "Hierarchy level without matching relations")
 def hierarchy_without_relations(a: Activity, ctx: Context) -> Iterator[Issue]:
     if a.hierarchy == 2 and not any(r.type == RELATED_PARENT for r in a.related):
         yield Issue(
@@ -60,7 +60,7 @@ def hierarchy_without_relations(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("E-D04", Severity.ERROR, "Child actual dates outside parent actual dates")
+@rule("E-D04", Category.RELATIONS, "Child actual dates outside parent actual dates")
 def child_actual_dates_outside_parent(a: Activity, ctx: Context) -> Iterator[Issue]:
     p = _parent_of(a, ctx)
     if p is None:
@@ -81,7 +81,7 @@ def child_actual_dates_outside_parent(a: Activity, ctx: Context) -> Iterator[Iss
         )
 
 
-@rule("E-D05", Severity.ERROR, "Activity identifier published more than once")
+@rule("E-D05", Category.RELATIONS, "Activity identifier published more than once")
 def duplicate_identifier(a: Activity, ctx: Context) -> Iterator[Issue]:
     docs = ctx.dataset.duplicate_identifiers.get(a.identifier)
     if docs:
@@ -93,7 +93,7 @@ def duplicate_identifier(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-D05", Severity.WARNING, "Child planned end after parent planned end")
+@rule("W-D05", Category.RELATIONS, "Child planned end after parent planned end")
 def child_planned_end_after_parent(a: Activity, ctx: Context) -> Iterator[Issue]:
     p = _parent_of(a, ctx)
     if p and a.planned_end and p.planned_end and a.planned_end > p.planned_end:
@@ -105,7 +105,7 @@ def child_planned_end_after_parent(a: Activity, ctx: Context) -> Iterator[Issue]
         )
 
 
-@rule("W-D06", Severity.WARNING, "Child recipient country not in parent's countries")
+@rule("W-D06", Category.RELATIONS, "Child recipient country not in parent's countries")
 def child_country_not_in_parent(a: Activity, ctx: Context) -> Iterator[Issue]:
     p = _parent_of(a, ctx)
     if p is None or not p.recipient_countries:
@@ -121,7 +121,7 @@ def child_country_not_in_parent(a: Activity, ctx: Context) -> Iterator[Issue]:
         )
 
 
-@rule("W-D07", Severity.WARNING, "Child default classification differs from parent")
+@rule("W-D07", Category.RELATIONS, "Child default classification differs from parent")
 def child_defaults_differ(a: Activity, ctx: Context) -> Iterator[Issue]:
     p = _parent_of(a, ctx)
     if p is None:
@@ -140,7 +140,7 @@ def child_defaults_differ(a: Activity, ctx: Context) -> Iterator[Issue]:
             )
 
 
-@rule("W-D08", Severity.WARNING, "Parent closed while child still in implementation")
+@rule("W-D08", Category.RELATIONS, "Parent closed while child still in implementation")
 def parent_closed_child_implementing(a: Activity, ctx: Context) -> Iterator[Issue]:
     p = _parent_of(a, ctx)
     if p and p.is_closed and a.status == STATUS_IMPLEMENTATION:
