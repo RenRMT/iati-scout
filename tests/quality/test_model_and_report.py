@@ -5,7 +5,7 @@ from pathlib import Path
 from iati_scout.quality.findings import Category, Severity, Source, d_portal_activity_url
 from iati_scout.quality.model import load_dataset
 from iati_scout.quality.registry import RuleConfig, all_rules, load_rule_config
-from iati_scout.quality.report import build_report, write_reports
+from iati_scout.quality.report import build_report, build_summary, write_reports
 from iati_scout.quality.runner import findings_from_reports, run_checks, select_rules
 
 from .test_export import VALIDATOR_REPORT
@@ -134,7 +134,7 @@ def test_run_checks_and_reports(tmp_path):
     ds = load_dataset(_org_dir(tmp_path), "XX-TEST-1", today=date(2026, 9, 11))
     config = RuleConfig(systemic={"W-C09": True})
     rules = select_rules(config)
-    findings = findings_from_reports([VALIDATOR_REPORT]) + run_checks(ds, config, rules)
+    findings = findings_from_reports([VALIDATOR_REPORT], RuleConfig()) + run_checks(ds, config, rules)
     codes = {f.code for f in findings}
     assert {"E-D05", "W-E04", "7.5.3"} <= codes
 
@@ -163,7 +163,7 @@ def test_report_json_matches_the_official_shape(tmp_path):
     ds = load_dataset(_org_dir(tmp_path), "XX-TEST-1", today=date(2026, 9, 11))
     config = RuleConfig()
     rules = select_rules(config)
-    findings = findings_from_reports([VALIDATOR_REPORT]) + run_checks(ds, config, rules)
+    findings = findings_from_reports([VALIDATOR_REPORT], RuleConfig()) + run_checks(ds, config, rules)
 
     paths = write_reports(
         findings,
@@ -230,16 +230,38 @@ def test_report_flags_activities_missing_from_the_datastore(tmp_path):
     unknown["report"]["errors"] = [
         {**VALIDATOR_REPORT["report"]["errors"][0], "identifier": "XX-TEST-1-NOT-INGESTED"}
     ]
-    findings = findings_from_reports([unknown])
+    findings = findings_from_reports([unknown], RuleConfig())
+    known = {a.identifier for a in ds}
 
-    report = build_report(
-        findings, [], "XX-TEST-1", len(ds), [unknown], {a.identifier for a in ds}
-    )
+    report = build_report(findings, [], "XX-TEST-1", len(ds), [unknown], known)
     assert report["scout"]["activities_not_in_datastore"] == ["XX-TEST-1-NOT-INGESTED"]
+    # "Affected" counts Datastore activities only, so it can never exceed activity_count.
+    assert report["scout"]["activities_affected"] == 0
+
+    summary = build_summary(findings, [], "XX-TEST-1", len(ds), [unknown], known)
+    assert f"**0** of {len(ds)}" in summary
+    assert "**not in the Datastore**: 1 activities" in summary
+
+
+def test_validator_findings_keep_details_and_systemic_flag():
+    with_details = dict(VALIDATOR_REPORT)
+    with_details["report"] = dict(VALIDATOR_REPORT["report"])
+    activity = VALIDATOR_REPORT["report"]["errors"][0]
+    group = activity["errors"][0]
+    error = {**group["errors"][0], "details": {"linked": "XX-OTHER-1"}}
+    with_details["report"]["errors"] = [
+        {**activity, "errors": [{**group, "errors": [error]}]}
+    ]
+
+    findings = findings_from_reports([with_details], RuleConfig(systemic={"7.5.3": True}))
+
+    assert findings[0].systemic
+    # Re-emitted exactly as the validator supplied it.
+    assert findings[0].to_validator_error()["details"] == {"linked": "XX-OTHER-1"}
 
 
 def test_findings_from_report_flattens_the_nesting():
-    findings = findings_from_reports([VALIDATOR_REPORT])
+    findings = findings_from_reports([VALIDATOR_REPORT], RuleConfig())
     assert len(findings) == 1
     f = findings[0]
     assert f.code == "7.5.3"
@@ -269,7 +291,7 @@ def test_unknown_validator_category_or_severity_does_not_drop_the_finding():
             ]
         }
     }
-    findings = findings_from_reports([odd])
+    findings = findings_from_reports([odd], RuleConfig())
     assert len(findings) == 1
     assert findings[0].category == Category.IATI
     assert findings[0].severity == Severity.ERROR
@@ -303,7 +325,7 @@ def test_load_rule_config(tmp_path):
     )
     config = load_rule_config(path)
     assert config.thresholds["stale_months"] == 6
-    assert config.thresholds["budget_max_days"] == 366  # default preserved
+    assert config.thresholds["budget_min_days"] == 28  # default preserved
     assert not config.is_enabled("E-A05")
     assert config.is_systemic("W-C09")
     assert config.is_enabled("E-A06")

@@ -36,6 +36,7 @@ from iati_scout.quality.findings import (
     Finding,
     Source,
     d_portal_activity_url,
+    split_affected,
 )
 from iati_scout.quality.model import Dataset
 from iati_scout.quality.registry import RuleConfig, RuleSpec
@@ -137,7 +138,7 @@ def _build_rules_json(
             "weight": finding.severity.value,
             "title": finding.message,
             "description": "",
-            "systemic": False,
+            "systemic": config.is_systemic(code),
             "enabled": True,
         }
         for code, finding in sorted(seen.items())
@@ -146,14 +147,19 @@ def _build_rules_json(
 
 
 def _build_summary_json(
-    findings: list[Finding], rules: list[RuleSpec], activity_count: int
+    findings: list[Finding],
+    rules: list[RuleSpec],
+    activity_count: int,
+    known_identifiers: set[str] | None = None,
 ) -> dict[str, Any]:
     by_rule: dict[str, list[Finding]] = defaultdict(list)
     for finding in findings:
         by_rule[finding.code].append(finding)
 
     severity_totals = Counter(f.severity.value for f in findings)
-    activities_affected = len({f.iati_identifier for f in findings})
+    # Only Datastore activities count as "affected", so the dashboard's
+    # affected / activities ratio stays within 100%.
+    in_datastore, not_in_datastore = split_affected(findings, known_identifiers)
     systemic_findings = sum(1 for f in findings if f.systemic)
 
     # Every rule that produced a row, whichever source it came from — the
@@ -182,7 +188,8 @@ def _build_summary_json(
         "totals": {
             "findings": len(findings),
             "activities": activity_count,
-            "activities_affected": activities_affected,
+            "activities_affected": len(in_datastore),
+            "activities_not_in_datastore": len(not_in_datastore),
             "systemic_findings": systemic_findings,
             **{s.value: severity_totals.get(s.value, 0) for s in SEVERITY_ORDER},
         },
@@ -279,7 +286,10 @@ def write_export(
     }
     _write_json(_build_meta_json(dataset, rules, raw_manifest, validator_reports), paths["meta"])
     _write_json(_build_rules_json(rules, config, findings), paths["rules"])
-    _write_json(_build_summary_json(findings, rules, len(dataset)), paths["summary"])
+    known_identifiers = {a.identifier for a in dataset}
+    _write_json(
+        _build_summary_json(findings, rules, len(dataset), known_identifiers), paths["summary"]
+    )
     _write_json(_build_activities_json(dataset, findings), paths["activities"])
     _write_findings_parquet(findings, paths["findings"])
     return paths

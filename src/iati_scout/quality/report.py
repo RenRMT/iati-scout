@@ -24,7 +24,13 @@ from pathlib import Path
 from typing import Any
 
 from iati_scout import __version__
-from iati_scout.quality.findings import SEVERITY_ORDER, Finding, Severity, Source
+from iati_scout.quality.findings import (
+    SEVERITY_ORDER,
+    Finding,
+    Severity,
+    Source,
+    split_affected,
+)
 from iati_scout.quality.registry import RuleSpec
 from iati_scout.validator import document_summary, is_valid, overall_valid
 
@@ -95,6 +101,7 @@ def build_report(
     # `valid` means "no critical or error from the official ruleset". A scout
     # advisory is never a standard violation, so it cannot make a file invalid.
     valid = overall_valid(validator_reports)
+    in_datastore, not_in_datastore = split_affected(findings, known_identifiers)
 
     first = (validator_reports[0].get("report") or {}) if validator_reports else {}
     return {
@@ -115,13 +122,11 @@ def build_report(
             "tool_version": __version__,
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "activity_count": activity_count,
-            "activities_affected": len(by_activity),
+            "activities_affected": len(in_datastore),
             # Published (and so validated) but absent from the Datastore: either
             # the Datastore has not re-ingested the file yet, or those
             # activities failed ingestion. Scout rules cannot run on them.
-            "activities_not_in_datastore": sorted(set(by_activity) - known_identifiers)
-            if known_identifiers is not None
-            else [],
+            "activities_not_in_datastore": sorted(not_in_datastore),
             "per_source": dict(Counter(f.source.value for f in findings)),
             "rules_run": [spec.code for spec in rules],
             "documents": [document_summary(r) for r in validator_reports],
@@ -173,7 +178,7 @@ def build_summary(
     for finding in findings:
         by_rule[finding.code].append(finding)
     severity_totals = Counter(f.severity for f in findings)
-    affected = len({f.iati_identifier for f in findings})
+    in_datastore, not_in_datastore = split_affected(findings, known_identifiers)
     rule_titles = {spec.code: spec.title for spec in rules}
 
     lines = [
@@ -201,23 +206,16 @@ def build_summary(
     for severity in SEVERITY_ORDER:
         lines.append(f"- {severity.value.title()}: **{severity_totals.get(severity, 0)}**")
     if activity_count:
-        in_datastore = (
-            len({f.iati_identifier for f in findings} & known_identifiers)
-            if known_identifiers is not None
-            else affected
-        )
         lines.append(
-            f"- Activities with at least one finding: **{in_datastore}** of {activity_count} "
-            f"({in_datastore / activity_count:.0%})"
+            f"- Activities with at least one finding: **{len(in_datastore)}** of "
+            f"{activity_count} ({len(in_datastore) / activity_count:.0%})"
         )
-    if known_identifiers is not None:
-        unknown = {f.iati_identifier for f in findings} - known_identifiers
-        if unknown:
-            lines.append(
-                f"- Published and validated but **not in the Datastore**: {len(unknown)} "
-                "activities (the Datastore has not ingested them; scout rules could not run "
-                "on them)"
-            )
+    if not_in_datastore:
+        lines.append(
+            f"- Published and validated but **not in the Datastore**: {len(not_in_datastore)} "
+            "activities (the Datastore has not ingested them; scout rules could not run "
+            "on them)"
+        )
     lines.append("")
 
     for source, heading in (

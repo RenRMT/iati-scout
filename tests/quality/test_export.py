@@ -62,9 +62,9 @@ def _dataset_with_findings():
         },
     )
     ds = make_dataset(activity)
-    config = RuleConfig(systemic={"E-A05": True})
+    config = RuleConfig(systemic={"E-A05": True, "7.5.3": True})
     rules = select_rules(config)
-    findings = findings_from_reports([VALIDATOR_REPORT]) + run_checks(ds, config, rules)
+    findings = findings_from_reports([VALIDATOR_REPORT], config) + run_checks(ds, config, rules)
     return ds, config, rules, findings
 
 
@@ -106,6 +106,8 @@ def test_write_export_files(tmp_path):
     # Validator rules enter the catalogue from the report, not the registry.
     assert by_code["7.5.3"]["source"] == "validator"
     assert by_code["7.5.3"]["severity"] == "error"
+    # rules.toml can flag an official rule id as systemic too.
+    assert by_code["7.5.3"]["systemic"] is True
     assert "thresholds" in rules_json
 
     summary = json.loads(paths["summary"].read_text(encoding="utf-8"))
@@ -165,6 +167,25 @@ def test_findings_parquet_round_trips(tmp_path):
     assert validator["source"] == "validator"
     assert validator["context"] == "period-end at line: 49"
     assert json.loads(validator["evidence"]) == {}
+
+
+def test_summary_counts_only_datastore_activities_as_affected(tmp_path):
+    """The dashboard divides activities_affected by activities, so it must stay within 100%."""
+    ds = make_dataset(make_activity())
+    unknown = dict(VALIDATOR_REPORT)
+    unknown["report"] = dict(VALIDATOR_REPORT["report"])
+    unknown["report"]["errors"] = [
+        {**VALIDATOR_REPORT["report"]["errors"][0], "identifier": "XX-NOT-INGESTED"}
+    ]
+    config = RuleConfig()
+    findings = findings_from_reports([VALIDATOR_REPORT, unknown], config)
+
+    paths = write_export(findings, [], config, ds, tmp_path, validator_reports=[unknown])
+
+    totals = json.loads(paths["summary"].read_text(encoding="utf-8"))["totals"]
+    assert totals["activities"] == 1
+    assert totals["activities_affected"] == 1
+    assert totals["activities_not_in_datastore"] == 1
 
 
 def test_export_item_locator_for_row_level_finding(tmp_path):

@@ -247,7 +247,9 @@ def _check(args: argparse.Namespace) -> int:
         settings.org_id,
         len(rules),
     )
-    findings = findings_from_reports(validator_reports) + run_checks(dataset, config, rules)
+    findings = findings_from_reports(validator_reports, config) + run_checks(
+        dataset, config, rules
+    )
 
     out_dir = (
         Path(args.out_dir)

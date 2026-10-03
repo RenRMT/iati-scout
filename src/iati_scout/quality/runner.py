@@ -100,12 +100,13 @@ def _severity(value: str | None) -> Severity:
         return Severity.ERROR
 
 
-def findings_from_report(report: dict[str, Any]) -> list[Finding]:
+def findings_from_report(report: dict[str, Any], config: RuleConfig) -> list[Finding]:
     """Flatten one official validator report into Findings.
 
     The report nests activity -> category -> error; the flat `Finding` keeps
     the activity identity and category on each row so both sources can live in
     one list, and `to_validator_error()` rebuilds the nesting on the way out.
+    `config` supplies the systemic flag per validator rule id.
     """
     inner = report.get("report") or {}
     findings: list[Finding] = []
@@ -115,9 +116,10 @@ def findings_from_report(report: dict[str, Any]) -> list[Finding]:
         for group in activity.get("errors") or []:
             category = _category(group.get("category"))
             for error in group.get("errors") or []:
+                code = error.get("id") or ""
                 findings.append(
                     Finding(
-                        code=error.get("id") or "",
+                        code=code,
                         severity=_severity(error.get("severity")),
                         category=category,
                         source=Source.VALIDATOR,
@@ -133,16 +135,17 @@ def findings_from_report(report: dict[str, Any]) -> list[Finding]:
                             "d_portal": d_portal_activity_url(identifier),
                             "datastore_json": datastore_activity_url(identifier),
                         },
-                        systemic=False,
+                        systemic=config.is_systemic(code),
+                        details=error.get("details"),
                     )
                 )
     return findings
 
 
-def findings_from_reports(reports: list[dict[str, Any]]) -> list[Finding]:
+def findings_from_reports(reports: list[dict[str, Any]], config: RuleConfig) -> list[Finding]:
     findings: list[Finding] = []
     for report in reports:
-        document_findings = findings_from_report(report)
+        document_findings = findings_from_report(report, config)
         logger.info(
             "%s: %d finding(s) from the official validator",
             report.get("registry_name") or report.get("document_url"),

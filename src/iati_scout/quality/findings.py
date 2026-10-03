@@ -136,6 +136,9 @@ class Finding:
     related: list[RelatedActivity] = field(default_factory=list)
     urls: dict[str, str] = field(default_factory=dict)
     systemic: bool = False
+    # The validator's own `details` object, kept verbatim (even when empty);
+    # None when the validator sent none, and for scout findings.
+    details: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The flat form used by findings.jsonl/csv and the dashboard export."""
@@ -148,7 +151,7 @@ class Finding:
 
     def to_validator_error(self) -> dict[str, Any]:
         """The nested form the official report uses inside `report.errors[].errors[].errors[]`."""
-        details: dict[str, Any] = {}
+        details = self.details
         if self.source == Source.SCOUT:
             details = {
                 "source": self.source.value,
@@ -167,9 +170,24 @@ class Finding:
             "message": self.message,
             "context": self.context,
         }
-        if details:
+        if details is not None:
             error["details"] = details
         return error
+
+
+def split_affected(
+    findings: list[Finding], known_identifiers: set[str] | None
+) -> tuple[set[str], set[str]]:
+    """Activities with a finding, split into (in the Datastore, not in the Datastore).
+
+    The validator reads the publisher's XML directly, so it can report
+    activities the Datastore has not ingested; counting those against the
+    Datastore's activity total would push "affected" above 100%.
+    """
+    affected = {f.iati_identifier for f in findings}
+    if known_identifiers is None:
+        return affected, set()
+    return affected & known_identifiers, affected - known_identifiers
 
 
 def _jsonable(value: Any) -> Any:
