@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterator
 
 from iati_scout.quality.findings import Category, Issue, fmt_pct
@@ -23,16 +22,6 @@ DEFAULT_FIELDS = {
     "default_tied_status": "default-tied-status",
     "collaboration_type": "collaboration-type",
 }
-
-
-def _sector_sums(a: Activity) -> dict[str, tuple[float, list[float | None], int]]:
-    """vocabulary -> (sum of percentages, percentages, number of sectors)."""
-    per_vocab: dict[str, list[float | None]] = defaultdict(list)
-    for s in a.sectors:
-        per_vocab[s.vocabulary or DAC_SECTOR_VOCABULARY].append(s.percentage)
-    return {
-        v: (sum(p for p in pcts if p is not None), pcts, len(pcts)) for v, pcts in per_vocab.items()
-    }
 
 
 @rule("E-C04", Category.CLASSIFICATIONS, "Recipient country and region both given without percentages")
@@ -126,91 +115,6 @@ def missing_defaults(a: Activity, ctx: Context) -> Iterator[Issue]:
         yield Issue(
             f"Missing default classification(s): {', '.join(missing)}",
             {"missing": missing},
-        )
-
-
-def dac_sector_percentage_completeness(a: Activity, ctx: Context) -> Iterator[Issue]:
-    tol = ctx.t("percentage_tolerance")
-    sums = _sector_sums(a)
-    if DAC_SECTOR_VOCABULARY not in sums:
-        return
-    _total, pcts, count = sums[DAC_SECTOR_VOCABULARY]
-    codes = [s.code for s in a.sectors if (s.vocabulary or DAC_SECTOR_VOCABULARY) == DAC_SECTOR_VOCABULARY]
-    if count > 1 and any(p is None for p in pcts):
-        yield Issue(
-            f"{count} DAC sectors declared ({', '.join(codes)}) but a percentage is "
-            f"missing for at least one of them",
-            {"sectors": codes, "percentages": pcts},
-        )
-    elif count == 1 and pcts[0] is not None and abs(pcts[0] - 100) > tol:
-        yield Issue(
-            f"Single DAC sector {codes[0]} has percentage {pcts[0]:g}%, which should "
-            f"be omitted or set to 100",
-            {"sector": codes[0], "percentage": pcts[0]},
-        )
-
-
-def single_country_percentage(a: Activity, ctx: Context) -> Iterator[Issue]:
-    tol = ctx.t("percentage_tolerance")
-    if len(a.recipient_countries) == 1:
-        c = a.recipient_countries[0]
-        if c.percentage is not None and abs(c.percentage - 100) > tol:
-            yield Issue(
-                f"Single recipient country {c.code} has percentage {c.percentage:g}%, "
-                f"which should be omitted or set to 100",
-                {"country": c.code, "percentage": c.percentage},
-            )
-
-
-def region_percentage_completeness(a: Activity, ctx: Context) -> Iterator[Issue]:
-    tol = ctx.t("percentage_tolerance")
-    regions = a.recipient_regions
-    codes = [r.code for r in regions]
-    pcts = [r.percentage for r in regions]
-    if len(regions) > 1 and any(p is None for p in pcts):
-        yield Issue(
-            f"{len(regions)} recipient regions declared ({', '.join(codes)}) but a "
-            f"percentage is missing for at least one of them",
-            {"regions": codes, "percentages": pcts},
-        )
-    elif len(regions) == 1 and pcts[0] is not None and abs(pcts[0] - 100) > tol:
-        yield Issue(
-            f"Single recipient region {codes[0]} has percentage {pcts[0]:g}%, which "
-            f"should be omitted or set to 100",
-            {"region": codes[0], "percentage": pcts[0]},
-        )
-
-
-def region_percentages_sum(a: Activity, ctx: Context) -> Iterator[Issue]:
-    tol = ctx.t("percentage_tolerance")
-    regions = a.recipient_regions
-    pcts = [r.percentage for r in regions]
-    if len(regions) > 1 and all(p is not None for p in pcts):
-        total = sum(pcts)
-        if abs(total - 100) > tol:
-            yield Issue(
-                f"Recipient-region percentages sum to {total:g}% across {len(regions)} "
-                f"regions, expected 100%",
-                {"regions": [r.code for r in regions], "percentages": pcts, "sum": total},
-            )
-
-
-def default_language_missing(a: Activity, ctx: Context) -> Iterator[Issue]:
-    if a.default_language:
-        return
-    title_langs = a.raw_list("title_narrative_xml_lang")
-    description_langs = a.raw_list("description_narrative_xml_lang")
-    if len(title_langs) < len(a.raw_list("title_narrative")) or any(not lang for lang in title_langs):
-        yield Issue(
-            "No default language (@xml:lang on iati-activity) and the title narrative "
-            "does not specify a language",
-            {"default_language": None, "title_narrative_xml_lang": title_langs},
-        )
-    if len(description_langs) < len(a.descriptions) or any(not lang for lang in description_langs):
-        yield Issue(
-            "No default language (@xml:lang on iati-activity) and at least one "
-            "description narrative does not specify a language",
-            {"default_language": None, "description_narrative_xml_lang": description_langs},
         )
 
 

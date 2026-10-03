@@ -86,21 +86,3 @@ def transaction_after_last_updated(a: Activity, ctx: Context) -> Iterator[Issue]
                 {"transaction_date": t.date, "last_updated": cutoff},
                 item=t.locator(),
             )
-
-
-def last_updated_in_future(a: Activity, ctx: Context) -> Iterator[Issue]:
-    if a.last_updated and a.last_updated.date() > ctx.today:
-        yield Issue(
-            f"last-updated-datetime {fmt_date(a.last_updated.date())} is after today "
-            f"({fmt_date(ctx.today)})",
-            {"last_updated": a.last_updated.date(), "today": ctx.today},
-        )
-
-
-def missing_start_date(a: Activity, ctx: Context) -> Iterator[Issue]:
-    if not a.planned_start and not a.actual_start:
-        yield Issue(
-            "Activity has neither a planned start date (type 1) nor an actual start "
-            "date (type 2)",
-            {"planned_start": None, "actual_start": None},
-        )
