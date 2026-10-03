@@ -39,6 +39,7 @@ from iati_scout.quality.findings import (
 )
 from iati_scout.quality.model import Dataset
 from iati_scout.quality.registry import RuleConfig, RuleSpec
+from iati_scout.validator import document_summary, overall_valid
 
 SCHEMA_VERSION = 2
 
@@ -247,23 +248,12 @@ def _build_meta_json(
         # IATI versions it separately from this tool, so pinning it here is what
         # makes a past run reproducible.
         "validator": {
-            "valid": all(r.get("valid", True) for r in validator_reports)
-            if validator_reports
-            else None,
+            "valid": overall_valid(validator_reports),
             "iati_version": first.get("iatiVersion"),
             "api_version": first.get("apiVersion"),
             "ruleset_commit_sha": first.get("rulesetCommitSha"),
             "codelist_commit_sha": first.get("codelistCommitSha"),
-            "documents": [
-                {
-                    "registry_name": r.get("registry_name"),
-                    "document_url": r.get("document_url"),
-                    "registry_hash": r.get("registry_hash"),
-                    "valid": r.get("valid"),
-                    "summary": (r.get("report") or {}).get("summary") or {},
-                }
-                for r in validator_reports
-            ],
+            "documents": [document_summary(r) for r in validator_reports],
         },
     }
 

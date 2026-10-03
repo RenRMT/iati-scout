@@ -39,7 +39,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -57,6 +57,10 @@ TIMEOUT = 120
 
 class ValidatorError(Exception):
     """Raised when the Registry or Validator API returns an unrecoverable error."""
+
+
+class ValidatorNotFound(ValidatorError):
+    """The requested resource does not exist (HTTP 404), e.g. a document not validated yet."""
 
 
 @dataclass(frozen=True)
@@ -97,23 +101,31 @@ class ValidatorClient:
         self.validator_base_url = validator_base_url.rstrip("/")
         self.registry_base_url = registry_base_url.rstrip("/")
         self.session = session or requests.Session()
-        self.session.headers["Ocp-Apim-Subscription-Key"] = api_key
+        # Sent per request, only to the validator: the Registry does not use it.
+        self._api_key = api_key
 
-    def _get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
+    def _get(
+        self, url: str, params: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         last_exc: Exception | None = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                response = self.session.get(url, params=params, timeout=TIMEOUT)
+                response = self.session.get(url, params=params, headers=headers, timeout=TIMEOUT)
             except requests.RequestException as exc:  # network-level failure
                 last_exc = exc
             else:
                 if response.status_code == 404:
-                    raise ValidatorError(f"Not found: {url} {params}")
+                    raise ValidatorNotFound(f"Not found: {url} {params}")
                 if response.status_code < 400:
                     try:
                         return response.json()
                     except ValueError as exc:
                         raise ValidatorError(f"{url} returned non-JSON content") from exc
+                if response.status_code in (401, 403):
+                    raise ValidatorError(
+                        f"{url} returned HTTP {response.status_code}: check the IATI API key "
+                        "(the Datastore subscription key also covers the validator)"
+                    )
                 if response.status_code not in (429, 500, 502, 503, 504):
                     raise ValidatorError(
                         f"{url} returned HTTP {response.status_code}: {response.text[:200]}"
@@ -154,32 +166,39 @@ class ValidatorClient:
 
     def fetch_report(self, dataset: RegistryDataset) -> dict[str, Any]:
         """The stored validation report for one registered document."""
-        return self._get(f"{self.validator_base_url}/report", {"id": dataset.registry_id})
+        return self._get(
+            f"{self.validator_base_url}/report",
+            {"id": dataset.registry_id},
+            headers={"Ocp-Apim-Subscription-Key": self._api_key},
+        )
 
-    def fetch_reports(self, org_id: str) -> list[dict[str, Any]]:
+    def fetch_reports(self, org_id: str) -> tuple[list[dict[str, Any]], list[RegistryDataset]]:
         """A report per activity document the publisher has registered.
 
-        A document the validator has not processed yet is logged and skipped
-        rather than failing the run: one missing file should not hide the
-        findings in the others.
+        Returns `(reports, missing)`. A document the validator has not processed
+        yet (404) is logged and returned in `missing` rather than failing the
+        run: one unvalidated file should not hide the findings in the others.
+        Any other error (auth, persistent 5xx) fails the whole fetch, so a
+        partial result never replaces a complete cached one.
         """
         reports = []
+        missing = []
         for dataset in self.find_datasets(org_id):
             try:
                 report = self.fetch_report(dataset)
-            except ValidatorError as exc:
+            except ValidatorNotFound:
                 logger.warning(
-                    "No validation report for %s (%s): %s",
+                    "No validation report yet for %s (%s)",
                     dataset.registry_name,
                     dataset.document_url,
-                    exc,
                 )
+                missing.append(dataset)
                 continue
             summary = (report.get("report") or {}).get("summary") or {}
             logger.info(
                 "%s: %s (critical=%s error=%s warning=%s advisory=%s)",
                 dataset.registry_name,
-                "valid" if report.get("valid") else "INVALID",
+                "valid" if is_valid(report) else "INVALID",
                 summary.get("critical", 0),
                 summary.get("error", 0),
                 summary.get("warning", 0),
@@ -191,14 +210,46 @@ class ValidatorClient:
                 f"The validator has no stored report for any document of {org_id}. "
                 "IATI validates registered documents on its own schedule; try again later."
             )
-        return reports
+        return reports, missing
 
 
-def write_reports(reports: list[dict[str, Any]], org_id: str, out_dir: Path) -> Path:
+def is_valid(report: dict[str, Any]) -> bool:
+    """Whether one document passed the official ruleset; a report without the flag is not."""
+    valid = report.get("valid")
+    if valid is None:
+        valid = (report.get("report") or {}).get("valid")
+    return bool(valid)
+
+
+def overall_valid(reports: list[dict[str, Any]]) -> bool | None:
+    """Whether every document is valid; None when there are no reports to judge."""
+    return all(is_valid(r) for r in reports) if reports else None
+
+
+def document_summary(report: dict[str, Any]) -> dict[str, Any]:
+    """The per-document facts carried into the manifest, report.json and the dashboard."""
+    return {
+        "registry_name": report.get("registry_name"),
+        "registry_id": report.get("registry_id"),
+        "registry_hash": report.get("registry_hash"),
+        "document_url": report.get("document_url"),
+        "valid": is_valid(report),
+        "summary": (report.get("report") or {}).get("summary") or {},
+    }
+
+
+def write_reports(
+    reports: list[dict[str, Any]],
+    org_id: str,
+    out_dir: Path,
+    missing: list[RegistryDataset] | None = None,
+) -> Path:
     """Cache the raw reports under `out_dir/<org_id>/`, one file per document.
 
     Kept verbatim so a `check` run is reproducible offline and so the exact
     ruleset/codelist commit each report was produced against stays auditable.
+    `missing` records registered documents that had no report yet, so a later
+    `check` can say its result covers only part of the publisher's data.
     """
     org_dir = out_dir / org_id
     org_dir.mkdir(parents=True, exist_ok=True)
@@ -206,6 +257,10 @@ def write_reports(reports: list[dict[str, Any]], org_id: str, out_dir: Path) -> 
         "org_id": org_id,
         "fetched_at": datetime.now(UTC).isoformat(),
         "documents": [],
+        "missing": [
+            {"registry_name": d.registry_name, "document_url": d.document_url}
+            for d in missing or []
+        ],
     }
     for report in reports:
         name = report.get("registry_name") or report.get("registry_id") or "report"
@@ -214,17 +269,13 @@ def write_reports(reports: list[dict[str, Any]], org_id: str, out_dir: Path) -> 
         inner = report.get("report") or {}
         manifest["documents"].append(
             {
+                **document_summary(report),
                 "registry_name": name,
-                "registry_id": report.get("registry_id"),
-                "registry_hash": report.get("registry_hash"),
-                "document_url": report.get("document_url"),
-                "valid": report.get("valid"),
                 "file": path.name,
                 "iati_version": inner.get("iatiVersion"),
                 "api_version": inner.get("apiVersion"),
                 "ruleset_commit_sha": inner.get("rulesetCommitSha"),
                 "codelist_commit_sha": inner.get("codelistCommitSha"),
-                "summary": inner.get("summary") or {},
             }
         )
     manifest_path = org_dir / "manifest.json"
@@ -232,19 +283,22 @@ def write_reports(reports: list[dict[str, Any]], org_id: str, out_dir: Path) -> 
     return manifest_path
 
 
-def load_reports(org_id: str, out_dir: Path) -> list[dict[str, Any]]:
-    """Read back the cached reports written by `write_reports`. Empty if never fetched."""
+def load_manifest(org_id: str, out_dir: Path) -> dict[str, Any] | None:
+    """The manifest written by `write_reports`, or None if never fetched."""
     manifest_path = out_dir / org_id / "manifest.json"
     if not manifest_path.exists():
+        return None
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def load_reports(org_id: str, out_dir: Path) -> list[dict[str, Any]]:
+    """Read back the cached reports written by `write_reports`. Empty if never fetched."""
+    manifest = load_manifest(org_id, out_dir)
+    if manifest is None:
         return []
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     reports = []
     for doc in manifest.get("documents", []):
         path = out_dir / org_id / doc["file"]
         if path.exists():
             reports.append(json.loads(path.read_text(encoding="utf-8")))
     return reports
-
-
-def dataset_summary(datasets: list[RegistryDataset]) -> list[dict[str, Any]]:
-    return [asdict(d) for d in datasets]

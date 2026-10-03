@@ -11,7 +11,10 @@ from iati_scout.validator import (
     RegistryDataset,
     ValidatorClient,
     ValidatorError,
+    is_valid,
+    load_manifest,
     load_reports,
+    overall_valid,
     write_reports,
 )
 
@@ -117,9 +120,40 @@ def test_fetch_reports_skips_a_document_with_no_stored_report():
         status=404,
     )
 
-    reports = _client().fetch_reports(ORG_ID)
+    reports, missing = _client().fetch_reports(ORG_ID)
 
     assert [r["registry_name"] for r in reports] == ["rvo-01"]
+    assert [d.registry_name for d in missing] == ["rvo-activities"]
+
+
+@responses.activate
+def test_fetch_reports_fails_when_a_document_keeps_erroring(monkeypatch):
+    """Only 'not validated yet' (404) is skipped; dropping a 5xx would make a partial result look complete."""
+    monkeypatch.setattr("iati_scout.validator.time.sleep", lambda _: None)
+    responses.add(responses.GET, f"{REGISTRY_BASE_URL}/package_search", json=PACKAGE_SEARCH)
+    responses.add(responses.GET, f"{VALIDATOR_BASE_URL}/report", json=_report("rvo-01"))
+    responses.add(responses.GET, f"{VALIDATOR_BASE_URL}/report", status=503)
+
+    with pytest.raises(ValidatorError, match="failed after"):
+        _client().fetch_reports(ORG_ID)
+
+
+@responses.activate
+def test_fetch_reports_reports_an_auth_failure_as_such():
+    responses.add(responses.GET, f"{REGISTRY_BASE_URL}/package_search", json=PACKAGE_SEARCH)
+    responses.add(responses.GET, f"{VALIDATOR_BASE_URL}/report", status=401)
+
+    with pytest.raises(ValidatorError, match="API key"):
+        _client().fetch_reports(ORG_ID)
+
+
+@responses.activate
+def test_api_key_is_not_sent_to_the_registry():
+    responses.add(responses.GET, f"{REGISTRY_BASE_URL}/package_search", json=PACKAGE_SEARCH)
+
+    _client().find_datasets(ORG_ID)
+
+    assert "Ocp-Apim-Subscription-Key" not in responses.calls[0].request.headers
 
 
 @responses.activate
@@ -168,6 +202,24 @@ def test_reports_round_trip_through_the_cache(tmp_path):
     assert manifest["documents"][0]["summary"]["error"] == 10332
 
     assert load_reports(ORG_ID, tmp_path) == reports
+
+
+def test_manifest_records_documents_without_a_report(tmp_path):
+    missing = [RegistryDataset("9f1c2b77", "rvo-activities", "https://x/a.xml", "activity", None)]
+
+    write_reports([_report("rvo-01")], ORG_ID, tmp_path, missing)
+
+    assert load_manifest(ORG_ID, tmp_path)["missing"] == [
+        {"registry_name": "rvo-activities", "document_url": "https://x/a.xml"}
+    ]
+
+
+def test_validity_falls_back_to_the_inner_flag_and_defaults_to_invalid():
+    inner_only = {"report": {"valid": True}}
+    assert is_valid(inner_only)
+    assert not is_valid({"report": {}})
+    assert overall_valid([inner_only, {}]) is False
+    assert overall_valid([]) is None
 
 
 def test_load_reports_is_empty_when_never_fetched(tmp_path):

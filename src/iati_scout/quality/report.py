@@ -26,6 +26,7 @@ from typing import Any
 from iati_scout import __version__
 from iati_scout.quality.findings import SEVERITY_ORDER, Finding, Severity, Source
 from iati_scout.quality.registry import RuleSpec
+from iati_scout.validator import document_summary, is_valid, overall_valid
 
 CSV_COLUMNS = [
     "id",
@@ -93,7 +94,7 @@ def build_report(
     summary = {s.value: severity_totals.get(s, 0) for s in SEVERITY_ORDER}
     # `valid` means "no critical or error from the official ruleset". A scout
     # advisory is never a standard violation, so it cannot make a file invalid.
-    valid = all(r.get("valid", True) for r in validator_reports) if validator_reports else None
+    valid = overall_valid(validator_reports)
 
     first = (validator_reports[0].get("report") or {}) if validator_reports else {}
     return {
@@ -123,16 +124,7 @@ def build_report(
             else [],
             "per_source": dict(Counter(f.source.value for f in findings)),
             "rules_run": [spec.code for spec in rules],
-            "documents": [
-                {
-                    "registry_name": r.get("registry_name"),
-                    "document_url": r.get("document_url"),
-                    "registry_hash": r.get("registry_hash"),
-                    "valid": r.get("valid"),
-                    "summary": (r.get("report") or {}).get("summary") or {},
-                }
-                for r in validator_reports
-            ],
+            "documents": [document_summary(r) for r in validator_reports],
         },
     }
 
@@ -200,7 +192,7 @@ def build_summary(
             inner = r.get("report") or {}
             lines.append(
                 f"| [{r.get('registry_name')}]({r.get('document_url')}) | "
-                f"{'yes' if r.get('valid') else 'NO'} | "
+                f"{'yes' if is_valid(r) else 'NO'} | "
                 f"`{(inner.get('rulesetCommitSha') or '')[:10]}` |"
             )
         lines.append("")
