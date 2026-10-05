@@ -16,7 +16,6 @@ DEFAULT_RULES_PATH = PROJECT_ROOT / "rules.toml"
 
 DEFAULT_THRESHOLDS: dict[str, Any] = {
     "stale_months": 12,
-    "budget_max_days": 366,
     "budget_min_days": 28,
     "disbursed_tolerance": 0.01,
     "commitment_tolerance": 0.001,
@@ -25,7 +24,6 @@ DEFAULT_THRESHOLDS: dict[str, Any] = {
     "min_transaction_value": 1.0,
     "title_min_length": 10,
     "description_min_length": 30,
-    "percentage_tolerance": 0.5,
     "truncation_lengths": [255, 256, 500, 1000, 2000, 4000],
     "home_country": "NL",
     "home_bbox": [50.5, 3.2, 53.7, 7.3],

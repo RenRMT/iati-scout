@@ -117,7 +117,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _validate(args: argparse.Namespace) -> int:
-    from iati_scout.validator import ValidatorClient, ValidatorError, write_reports
+    from iati_scout.validator import (
+        ValidatorClient,
+        ValidatorError,
+        overall_valid,
+        write_reports,
+    )
 
     try:
         settings = load_settings(org_id=args.org_id)
@@ -136,7 +141,7 @@ def _validate(args: argparse.Namespace) -> int:
             for dataset in client.find_datasets(settings.org_id):
                 print(f"{dataset.registry_name}\t{dataset.file_type}\t{dataset.document_url}")
             return 0
-        reports = client.fetch_reports(settings.org_id)
+        reports, missing = client.fetch_reports(settings.org_id)
     except ValidatorError as exc:
         print(f"Validation fetch failed: {exc}", file=sys.stderr)
         return 1
@@ -144,18 +149,23 @@ def _validate(args: argparse.Namespace) -> int:
     validation_dir = (
         Path(args.validation_dir) if args.validation_dir else settings.validation_dir
     )
-    manifest_path = write_reports(reports, settings.org_id, validation_dir)
+    manifest_path = write_reports(reports, settings.org_id, validation_dir, missing)
 
     totals: dict[str, int] = {}
     for report in reports:
         for key, value in ((report.get("report") or {}).get("summary") or {}).items():
             totals[key] = totals.get(key, 0) + value
     counts = ", ".join(f"{v} {k}" for k, v in sorted(totals.items()) if v)
-    valid = all(r.get("valid") for r in reports)
     print(
-        f"{len(reports)} document(s), {'valid' if valid else 'INVALID'}"
+        f"{len(reports)} document(s), {'valid' if overall_valid(reports) else 'INVALID'}"
         f"{f': {counts}' if counts else ''}"
     )
+    for dataset in missing:
+        print(
+            f"Warning: no validation report yet for {dataset.registry_name} "
+            f"({dataset.document_url})",
+            file=sys.stderr,
+        )
     print(f"Reports cached in {manifest_path.parent}")
     return 0
 
@@ -169,7 +179,7 @@ def _check(args: argparse.Namespace) -> int:
     from iati_scout.quality.registry import all_rules, load_rule_config
     from iati_scout.quality.report import count_by_severity, write_reports
     from iati_scout.quality.runner import findings_from_reports, run_checks, select_rules
-    from iati_scout.validator import load_reports
+    from iati_scout.validator import load_manifest, load_reports
 
     if args.list_rules:
         for spec in all_rules():
@@ -222,6 +232,13 @@ def _check(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    if not args.no_validator:
+        for doc in (load_manifest(settings.org_id, validation_dir) or {}).get("missing", []):
+            print(
+                f"Warning: {doc['registry_name']} had no validation report when last fetched; "
+                "its validator findings are not included",
+                file=sys.stderr,
+            )
 
     dataset = load_dataset(org_dir, settings.org_id)
     logging.getLogger(__name__).info(
@@ -230,7 +247,9 @@ def _check(args: argparse.Namespace) -> int:
         settings.org_id,
         len(rules),
     )
-    findings = findings_from_reports(validator_reports) + run_checks(dataset, config, rules)
+    findings = findings_from_reports(validator_reports, config) + run_checks(
+        dataset, config, rules
+    )
 
     out_dir = (
         Path(args.out_dir)

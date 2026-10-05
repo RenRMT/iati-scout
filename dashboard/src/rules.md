@@ -59,10 +59,10 @@ const ruleCounts = [...(await sql`
 
 ```js
 const topActivities = await sql`
-  SELECT a.identifier, a.title, a.url_d_portal, count(*) AS findings
+  SELECT f.iati_identifier AS identifier, a.title, a.url_d_portal, count(*) AS findings
   FROM findings f LEFT JOIN activities a ON a.identifier = f.iati_identifier
   WHERE f.code = ${selectedCode}
-  GROUP BY a.identifier, a.title, a.url_d_portal
+  GROUP BY f.iati_identifier, a.title, a.url_d_portal
   ORDER BY findings DESC
   LIMIT 10
 `;
